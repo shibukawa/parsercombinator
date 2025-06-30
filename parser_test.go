@@ -929,3 +929,107 @@ func TestAdvancedErrorPatterns(t *testing.T) {
 		})
 	}
 }
+
+func TestZeroOrMore(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     []string
+		want    []int
+		wantErr bool
+	}{
+		{
+			name: "zero matches (empty input)",
+			src:  []string{},
+			want: []int{},
+		},
+		{
+			name: "zero matches (no matching elements)",
+			src:  []string{"test", "hello", "world"},
+			want: []int{},
+		},
+		{
+			name: "one match",
+			src:  []string{"100"},
+			want: []int{100},
+		},
+		{
+			name: "multiple matches",
+			src:  []string{"100", "200", "300"},
+			want: []int{100, 200, 300},
+		},
+		{
+			name: "partial matches (stops at non-matching)",
+			src:  []string{"100", "200", "test", "400"},
+			want: []int{100, 200},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, ZeroOrMore("digits", Digit()))
+			t.Log(pc.DumpTraceAsText())
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ZeroOrMore() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			assert.Equal(t, tt.want, result)
+		})
+	}
+}
+
+func TestOneOrMore(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     []string
+		want    []int
+		wantErr bool
+	}{
+		{
+			name:    "zero matches (empty input) - should error",
+			src:     []string{},
+			wantErr: true,
+		},
+		{
+			name:    "zero matches (no matching elements) - should error",
+			src:     []string{"test", "hello", "world"},
+			wantErr: true,
+		},
+		{
+			name: "one match",
+			src:  []string{"100"},
+			want: []int{100},
+		},
+		{
+			name: "multiple matches",
+			src:  []string{"100", "200", "300"},
+			want: []int{100, 200, 300},
+		},
+		{
+			name: "partial matches (stops at non-matching)",
+			src:  []string{"100", "200", "test", "400"},
+			want: []int{100, 200},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, OneOrMore("digits", Digit()))
+			t.Log(pc.DumpTraceAsText())
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("OneOrMore() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				assert.Equal(t, tt.want, result)
+			}
+		})
+	}
+}
