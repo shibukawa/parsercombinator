@@ -78,13 +78,13 @@ func ParseTerm() pc.Parser[int] {
 		func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
 			// 最初の因子の値
 			result := tokens[0].Val
-			
+
 			// 続く演算子と因子のペアを処理
 			for i := 1; i < len(tokens); i += 2 {
 				if i+1 < len(tokens) {
 					op := tokens[i].Raw
 					operand := tokens[i+1].Val
-					
+
 					switch op {
 					case "*":
 						result *= operand
@@ -96,7 +96,7 @@ func ParseTerm() pc.Parser[int] {
 					}
 				}
 			}
-			
+
 			return []pc.Token[int]{{Type: "result", Pos: tokens[0].Pos, Val: result}}, nil
 		},
 	)
@@ -114,13 +114,13 @@ func ParseExpression() pc.Parser[int] {
 		func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
 			// 最初の項の値
 			result := tokens[0].Val
-			
+
 			// 続く演算子と項のペアを処理
 			for i := 1; i < len(tokens); i += 2 {
 				if i+1 < len(tokens) {
 					op := tokens[i].Raw
 					operand := tokens[i+1].Val
-					
+
 					switch op {
 					case "+":
 						result += operand
@@ -129,7 +129,7 @@ func ParseExpression() pc.Parser[int] {
 					}
 				}
 			}
-			
+
 			return []pc.Token[int]{{Type: "result", Pos: tokens[0].Pos, Val: result}}, nil
 		},
 	)
@@ -164,7 +164,7 @@ func main() {
 	for _, tc := range testCases {
 		fmt.Printf("=== %s ===\n", tc.name)
 		fmt.Printf("入力: %s\n", joinTokens(tc.input))
-		
+
 		result, err := pc.EvaluateWithRawTokens(context, tc.input, ParseExpression())
 		if err != nil {
 			fmt.Printf("エラー: %v\n", err)
@@ -172,7 +172,7 @@ func main() {
 			fmt.Printf("結果: %d\n", result[0])
 		}
 		fmt.Println()
-		
+
 		// 新しいコンテキストを作成
 		context = pc.NewParseContext[int]()
 		context.TraceEnable = false
@@ -193,7 +193,7 @@ func main() {
 	for _, tc := range errorCases {
 		fmt.Printf("テスト: %s\n", tc.name)
 		fmt.Printf("入力: %s\n", joinTokens(tc.input))
-		
+
 		context = pc.NewParseContext[int]()
 		result, err := pc.EvaluateWithRawTokens(context, tc.input, ParseExpression())
 		if err != nil {

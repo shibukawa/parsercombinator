@@ -45,7 +45,7 @@ func CommaAndNumber() pc.Parser[int] {
 func NumberList() pc.Parser[int] {
 	return pc.Trans(
 		pc.Seq(
-			Number(),                                          // 最初の数値
+			Number(), // 最初の数値
 			pc.ZeroOrMore("additional-numbers", CommaAndNumber()), // 0個以上の追加数値
 		),
 		func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
@@ -87,7 +87,7 @@ func main() {
 	for _, tc := range testCases {
 		fmt.Printf("\n=== %s ===\n", tc.name)
 		fmt.Printf("入力: %v\n", tc.input)
-		
+
 		// 通常の数値リスト（最低1個必要）
 		result1, err1 := pc.EvaluateWithRawTokens(context, tc.input, NumberList())
 		if err1 != nil {
@@ -99,7 +99,7 @@ func main() {
 			}
 			fmt.Printf("NumberList 結果: %v\n", values)
 		}
-		
+
 		// 空のリストも許可する数値リスト
 		result2, err2 := pc.EvaluateWithRawTokens(context, tc.input, OptionalNumberList())
 		if err2 != nil {
@@ -111,14 +111,14 @@ func main() {
 			}
 			fmt.Printf("OptionalNumberList 結果: %v\n", values)
 		}
-		
+
 		context = pc.NewParseContext[int]()
 		context.TraceEnable = true
 	}
 
 	// ZeroOrMore 単体の動作例
 	fmt.Printf("\n=== ZeroOrMore 単体の動作例 ===\n")
-	
+
 	// 0個以上の数値をパース
 	zeroOrMoreTests := []struct {
 		name  string
@@ -129,7 +129,7 @@ func main() {
 		{"数値3個", []string{"1", "2", "3"}},
 		{"数値2個の後に文字", []string{"1", "2", "abc"}},
 	}
-	
+
 	for _, tc := range zeroOrMoreTests {
 		fmt.Printf("\n%s: %v\n", tc.name, tc.input)
 		result, err := pc.EvaluateWithRawTokens(context, tc.input, pc.ZeroOrMore("numbers", Number()))

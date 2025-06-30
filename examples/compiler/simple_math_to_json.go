@@ -11,11 +11,11 @@ import (
 
 // AST ノードの型定義
 type ASTNode struct {
-	Type     string     `json:"type"`
-	Value    *int       `json:"value,omitempty"`    // 数値ノードの場合
-	Operator *string    `json:"operator,omitempty"` // 演算子ノードの場合
-	Left     *ASTNode   `json:"left,omitempty"`     // 左の子ノード
-	Right    *ASTNode   `json:"right,omitempty"`    // 右の子ノード
+	Type     string   `json:"type"`
+	Value    *int     `json:"value,omitempty"`    // 数値ノードの場合
+	Operator *string  `json:"operator,omitempty"` // 演算子ノードの場合
+	Left     *ASTNode `json:"left,omitempty"`     // 左の子ノード
+	Right    *ASTNode `json:"right,omitempty"`    // 右の子ノード
 }
 
 // 数値リテラルのASTノード
@@ -82,18 +82,18 @@ func ParseTerm() pc.Parser[*ASTNode] {
 		func(pctx *pc.ParseContext[*ASTNode], tokens []pc.Token[*ASTNode]) ([]pc.Token[*ASTNode], error) {
 			// 最初の因子から開始
 			result := tokens[0].Val
-			
+
 			// 続く演算子と因子のペアを左結合で処理
 			for i := 1; i < len(tokens); i += 2 {
 				if i+1 < len(tokens) {
 					operator := tokens[i].Raw
 					rightOperand := tokens[i+1].Val
-					
+
 					// 新しい二項演算ノードを作成
 					result = NewBinaryOpNode(operator, result, rightOperand)
 				}
 			}
-			
+
 			return []pc.Token[*ASTNode]{{Type: "ast", Pos: tokens[0].Pos, Val: result}}, nil
 		},
 	)
@@ -111,18 +111,18 @@ func ParseExpression() pc.Parser[*ASTNode] {
 		func(pctx *pc.ParseContext[*ASTNode], tokens []pc.Token[*ASTNode]) ([]pc.Token[*ASTNode], error) {
 			// 最初の項から開始
 			result := tokens[0].Val
-			
+
 			// 続く演算子と項のペアを左結合で処理
 			for i := 1; i < len(tokens); i += 2 {
 				if i+1 < len(tokens) {
 					operator := tokens[i].Raw
 					rightOperand := tokens[i+1].Val
-					
+
 					// 新しい二項演算ノードを作成
 					result = NewBinaryOpNode(operator, result, rightOperand)
 				}
 			}
-			
+
 			return []pc.Token[*ASTNode]{{Type: "ast", Pos: tokens[0].Pos, Val: result}}, nil
 		},
 	)
@@ -158,7 +158,7 @@ func main() {
 	for _, tc := range testCases {
 		fmt.Printf("=== %s ===\n", tc.name)
 		fmt.Printf("入力: %s\n", joinTokens(tc.input))
-		
+
 		result, err := pc.EvaluateWithRawTokens(context, tc.input, ParseExpression())
 		if err != nil {
 			fmt.Printf("パースエラー: %v\n", err)
@@ -172,7 +172,7 @@ func main() {
 			}
 		}
 		fmt.Println()
-		
+
 		// 新しいコンテキストを作成
 		context = pc.NewParseContext[*ASTNode]()
 		context.TraceEnable = false
@@ -193,7 +193,7 @@ func main() {
 	for _, tc := range errorCases {
 		fmt.Printf("テスト: %s\n", tc.name)
 		fmt.Printf("入力: %s\n", joinTokens(tc.input))
-		
+
 		context = pc.NewParseContext[*ASTNode]()
 		result, err := pc.EvaluateWithRawTokens(context, tc.input, ParseExpression())
 		if err != nil {

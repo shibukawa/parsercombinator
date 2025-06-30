@@ -106,13 +106,16 @@ func SeqWithLabel[T any](label string, parsers ...Parser[T]) Parser[T] {
 		converted := make([]Token[T], 0, len(parsers))
 		offset := 0
 		for _, p := range parsers {
-			if offset >= len(src) {
-				if len(src) > 0 {
-					return 0, nil, NewErrNotMatch(label, "end of tokens", src[0].Pos)
-				}
-				return 0, nil, NewErrNotMatch(label, "end of tokens", nil)
+			// パーサーを実行する（入力が空でもZeroOrMoreやOptionalは実行される可能性がある）
+			var currentSrc []Token[T]
+			if offset < len(src) {
+				currentSrc = src[offset:]
+			} else {
+				// 入力が空でもパーサーを実行する（空のスライスを渡す）
+				currentSrc = []Token[T]{}
 			}
-			consumed, newTokens, err := p(pctx, src[offset:])
+
+			consumed, newTokens, err := p(pctx, currentSrc)
 			if err != nil {
 				return 0, src, err
 			}

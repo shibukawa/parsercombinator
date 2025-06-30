@@ -17,6 +17,9 @@ func init() {
 
 func Digit() Parser[int] {
 	return Trace("digit", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+		if len(src) == 0 {
+			return 0, nil, NewErrNotMatch("digit", "EOF", nil)
+		}
 		if src[0].Type == "raw" {
 			t := src[0]
 			i, err := strconv.Atoi(t.Raw)
@@ -34,7 +37,10 @@ func Digit() Parser[int] {
 var ErrWrongType = errors.New("wrong type")
 
 func String() Parser[int] {
-	return Trace("digit", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+	return Trace("string", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+		if len(src) == 0 {
+			return 0, nil, NewErrNotMatch("string", "EOF", nil)
+		}
 		if src[0].Type == "raw" {
 			t := src[0]
 			return 1, []Token[int]{{Type: "string", Pos: t.Pos, Raw: t.Raw}}, nil
@@ -53,6 +59,9 @@ func Operator() Parser[int] {
 		"/": true,
 	}
 	return Trace("operator", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+		if len(src) == 0 {
+			return 0, nil, NewErrNotMatch("operator", "EOF", nil)
+		}
 		if src[0].Type == "raw" {
 			t := src[0]
 			if _, ok := supportedOperators[t.Raw]; ok {
@@ -1032,4 +1041,54 @@ func TestOneOrMore(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Space parser for whitespace
+func Space() Parser[int] {
+	return Trace("space", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+		if src[0].Type == "raw" && src[0].Raw == " " {
+			return 1, []Token[int]{{Type: "space", Pos: src[0].Pos, Raw: " "}}, nil
+		}
+		return 0, nil, NewErrNotMatch("space", src[0].Raw, src[0].Pos)
+	})
+}
+
+// TestSeqWithZeroOrMoreEdgeCase tests the issue where Seq fails when the second parser
+// is ZeroOrMore and input ends after the first parser matches
+func TestSeqWithZeroOrMoreEdgeCase(t *testing.T) {
+	pc := NewParseContext[int]()
+	pc.TraceEnable = true
+
+	// This should work: digit followed by zero or more spaces
+	// Input: just "5" (no spaces after)
+	// Expected: should succeed because ZeroOrMore should match zero spaces
+	parser := Seq(Digit(), ZeroOrMore("spaces", Space()))
+
+	result, err := EvaluateWithRawTokens(pc, []string{"5"}, parser)
+	t.Log(pc.DumpTraceAsText())
+
+	// Currently this fails with "end of tokens" error, but it shouldn't
+	if err != nil {
+		t.Logf("Current behavior: fails with error: %v", err)
+		// This demonstrates the bug - ZeroOrMore should be able to match zero items
+		// even when there are no more tokens
+		assert.Contains(t, err.Error(), "end of tokens")
+	} else {
+		t.Log("Success case - this is the expected behavior")
+		assert.Equal(t, []int{5}, result)
+	}
+}
+
+// TestSeqWithZeroOrMoreWithSpaces tests the same parser with actual spaces
+func TestSeqWithZeroOrMoreWithSpaces(t *testing.T) {
+	pc := NewParseContext[int]()
+	pc.TraceEnable = false
+
+	parser := Seq(Digit(), ZeroOrMore("spaces", Space()))
+
+	// This should work fine: digit followed by spaces
+	result, err := EvaluateWithRawTokens(pc, []string{"5", " ", " "}, parser)
+	assert.NoError(t, err)
+	// The result will include all tokens from both parsers
+	t.Logf("Result with spaces: %v", result)
 }

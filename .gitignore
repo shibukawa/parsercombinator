@@ -23,3 +23,10 @@ go.work.sum
 
 # env file
 .env
+
+examples/basic/basic
+examples/basic/basic.exe
+examples/interpreter/interpreter
+examples/interpreter/interpreter.exe
+examples/compiler/compiler
+examples/compiler/compiler.exe
