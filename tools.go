@@ -126,15 +126,11 @@ func SeqWithLabel[T any](label string, parsers ...Parser[T]) Parser[T] {
 func Or[T any](parsers ...Parser[T]) Parser[T] {
 	return Trace("or", func(pctx *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
 		var allError []error
-		offset := 0
 		for _, p := range parsers {
-			consumed, newTokens, err := p(pctx, src[offset:])
-
-			// Process recover
-			offset += consumed
+			consumed, newTokens, err := p(pctx, src)
 
 			if err == nil { // match
-				return offset, newTokens, nil
+				return consumed, newTokens, nil
 			}
 
 			// not match
@@ -144,9 +140,9 @@ func Or[T any](parsers ...Parser[T]) Parser[T] {
 				continue
 			}
 			// critical error
-			return offset, nil, err
+			return consumed, nil, err
 		}
-		return offset, nil, &ParseError{
+		return 0, nil, &ParseError{
 			Parent: errors.Join(allError...), Pos: src[0].Pos,
 		}
 	})
@@ -258,4 +254,90 @@ func Recover[T any](search, body, skipUntil Parser[T]) Parser[T] {
 		}
 		return consumed, newTokens, nil
 	})
+}
+
+// Lookahead checks if the parser matches without consuming tokens
+// Returns empty tokens if match, error if not match
+func Lookahead[T any](parser Parser[T]) Parser[T] {
+	return Trace("lookahead", func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		_, _, err := parser(pc, src)
+		if err != nil {
+			return 0, nil, err
+		}
+		return 0, []Token[T]{}, nil
+	})
+}
+
+// NotFollowedBy succeeds if the parser does NOT match (negative lookahead)
+// Returns empty tokens if parser fails, error if parser succeeds
+func NotFollowedBy[T any](parser Parser[T]) Parser[T] {
+	return Trace("not-followed-by", func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		_, _, err := parser(pc, src)
+		if err == nil {
+			var pos *Pos
+			if len(src) > 0 {
+				pos = src[0].Pos
+			}
+			return 0, nil, NewErrNotMatch("not followed by", "matched", pos)
+		}
+		return 0, []Token[T]{}, nil
+	})
+}
+
+// Peek returns the result of the parser without consuming tokens
+// Useful for inspection or conditional parsing
+func Peek[T any](parser Parser[T]) Parser[T] {
+	return Trace("peek", func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		_, newTokens, err := parser(pc, src)
+		if err != nil {
+			return 0, nil, err
+		}
+		return 0, newTokens, nil
+	})
+}
+
+// FollowedBy is an alias for Lookahead for better readability
+func FollowedBy[T any](parser Parser[T]) Parser[T] {
+	return Lookahead(parser)
+}
+
+// Label provides a user-friendly label for error messages
+// When the parser fails, it replaces technical error details with the provided label
+// Unlike Trace, this is purely for error message improvement, not debugging
+func Label[T any](label string, parser Parser[T]) Parser[T] {
+	return func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		consumed, newTokens, err := parser(pc, src)
+		if err != nil {
+			var pos *Pos
+			if len(src) > 0 {
+				pos = src[0].Pos
+			}
+			return consumed, nil, NewErrNotMatch(label, "not matched", pos)
+		}
+		return consumed, newTokens, nil
+	}
+}
+
+// Expected creates a parser that fails with a specific expected message
+// Useful for creating custom error messages or placeholders
+func Expected[T any](message string) Parser[T] {
+	return func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		var pos *Pos
+		if len(src) > 0 {
+			pos = src[0].Pos
+		}
+		return 0, nil, NewErrNotMatch(message, "found something else", pos)
+	}
+}
+
+// Fail always fails with the given message
+// Useful for debugging or creating conditional failures
+func Fail[T any](message string) Parser[T] {
+	return func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		var pos *Pos
+		if len(src) > 0 {
+			pos = src[0].Pos
+		}
+		return 0, nil, NewErrCritical(message, pos)
+	}
 }

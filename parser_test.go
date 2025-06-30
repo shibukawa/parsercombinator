@@ -58,11 +58,11 @@ func Operator() Parser[int] {
 			if _, ok := supportedOperators[t.Raw]; ok {
 				return 1, []Token[int]{{Type: "operator", Pos: t.Pos, Raw: t.Raw}}, nil
 			}
-			return 0, nil, &ParseError{Parent: fmt.Errorf("%w '%s' is invalid operator", ErrWrongType, t.Raw), Pos: src[0].Pos}
+			return 0, nil, NewErrNotMatch("operator", fmt.Sprintf("'%s'", t.Raw), src[0].Pos)
 		} else if src[0].Type == "operator" {
-			return 1, nil, nil
+			return 1, src[0:1], nil
 		}
-		return 0, nil, &ParseError{Parent: fmt.Errorf("%w expected operator", ErrWrongType), Pos: src[0].Pos}
+		return 0, nil, NewErrNotMatch("operator", src[0].Type, src[0].Pos)
 	})
 }
 
@@ -533,6 +533,399 @@ func TestNone(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tt.wantCount, len(result))
+		})
+	}
+}
+
+func TestLookahead(t *testing.T) {
+	tests := []struct {
+		name    string
+		parser  Parser[int]
+		src     []string
+		wantErr bool
+		want    []int
+	}{
+		{
+			name:   "lookahead match - consume after check",
+			parser: Seq(Lookahead(Digit()), Digit()),
+			src:    []string{"100"},
+			want:   []int{100},
+		},
+		{
+			name:    "lookahead not match",
+			parser:  Seq(Lookahead(Digit()), Digit()),
+			src:     []string{"test"},
+			wantErr: true,
+		},
+		{
+			name: "conditional parsing with lookahead",
+			parser: Or(
+				Seq(Lookahead(Operator()), Operator(), Digit()),
+				Digit(),
+			),
+			src:  []string{"100"},
+			want: []int{100}, // Should match the second alternative (Digit)
+		},
+		{
+			name: "conditional parsing with lookahead - operator case",
+			parser: Or(
+				Seq(Lookahead(Operator()), Operator(), Digit()),
+				Digit(),
+			),
+			src:  []string{"+", "100"},
+			want: []int{0, 100}, // Operator produces Val=0, then digit produces 100
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Lookahead error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				assert.Equal(t, tt.want, result)
+			}
+		})
+	}
+}
+
+func TestNotFollowedBy(t *testing.T) {
+	tests := []struct {
+		name    string
+		parser  Parser[int]
+		src     []string
+		wantErr bool
+		want    []int
+	}{
+		{
+			name:   "not followed by - success case",
+			parser: Seq(Digit(), NotFollowedBy(Operator())),
+			src:    []string{"100", "200"},
+			want:   []int{100},
+		},
+		{
+			name:    "not followed by - fail case",
+			parser:  Seq(Digit(), NotFollowedBy(Operator())),
+			src:     []string{"100", "+"},
+			wantErr: true,
+		},
+		{
+			name:   "identifier not followed by digit",
+			parser: Seq(String(), NotFollowedBy(Digit())),
+			src:    []string{"var", "+"},
+			want:   []int{1}, // String parser produces 1 result with Raw value, counted as 1 item
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			_, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NotFollowedBy error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				// Convert results for comparison
+				var convertedResult []any
+				for _, token := range pc.Results {
+					if token.Val != 0 {
+						convertedResult = append(convertedResult, token.Val)
+					} else {
+						convertedResult = append(convertedResult, token.Raw)
+					}
+				}
+				assert.Equal(t, len(tt.want), len(convertedResult))
+			}
+		})
+	}
+}
+
+func TestPeek(t *testing.T) {
+	tests := []struct {
+		name    string
+		parser  Parser[int]
+		src     []string
+		wantErr bool
+		want    []int
+	}{
+		{
+			name:   "peek without consuming",
+			parser: Seq(Peek(Digit()), Digit(), Digit()),
+			src:    []string{"100", "200"},
+			want:   []int{100, 100, 200},
+		},
+		{
+			name: "peek for conditional logic",
+			parser: Seq(
+				Or(
+					Seq(Peek(Operator()), Operator()),
+					None[int](),
+				),
+				Digit(),
+			),
+			src:  []string{"+", "100"},
+			want: []int{0, 0, 100}, // Peek produces 0, Operator produces 0, Digit produces 100
+		},
+		{
+			name: "peek for conditional logic - no operator",
+			parser: Seq(
+				Or(
+					Seq(Peek(Operator()), Operator()),
+					None[int](),
+				),
+				Digit(),
+			),
+			src:  []string{"100"},
+			want: []int{100},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Peek error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				assert.Equal(t, tt.want, result)
+			}
+		})
+	}
+}
+
+func TestLabel(t *testing.T) {
+	tests := []struct {
+		name       string
+		parser     Parser[int]
+		src        []string
+		wantErr    bool
+		wantErrMsg string
+		want       []int
+	}{
+		{
+			name:   "label success case",
+			parser: Label("number", Digit()),
+			src:    []string{"100"},
+			want:   []int{100},
+		},
+		{
+			name:       "label error case - cleaner message",
+			parser:     Label("number", Digit()),
+			src:        []string{"text"},
+			wantErr:    true,
+			wantErrMsg: "number",
+		},
+		{
+			name:       "complex parser with label",
+			parser:     Label("arithmetic expression", Seq(Digit(), Operator(), Digit())),
+			src:        []string{"100", "invalid", "200"},
+			wantErr:    true,
+			wantErrMsg: "arithmetic expression",
+		},
+		{
+			name: "nested labels",
+			parser: Or(
+				Label("number", Digit()),
+				Label("text", String()),
+			),
+			src:  []string{"hello"},
+			want: []int{0}, // String parser produces Val=0 for strings
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Label error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.wantErrMsg != "" {
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+			}
+			if !tt.wantErr {
+				assert.Equal(t, tt.want, result)
+			}
+		})
+	}
+}
+
+func TestExpectedAndFail(t *testing.T) {
+	tests := []struct {
+		name       string
+		parser     Parser[int]
+		src        []string
+		wantErr    bool
+		wantErrMsg string
+		want       []int
+	}{
+		{
+			name:       "expected always fails",
+			parser:     Expected[int]("closing bracket"),
+			src:        []string{"100"},
+			wantErr:    true,
+			wantErrMsg: "closing bracket",
+		},
+		{
+			name:       "fail always fails",
+			parser:     Fail[int]("not implemented yet"),
+			src:        []string{"100"},
+			wantErr:    true,
+			wantErrMsg: "not implemented yet",
+		},
+		{
+			name: "conditional error with Or",
+			parser: Or(
+				Digit(),
+				Expected[int]("valid number"),
+			),
+			src:  []string{"100"},
+			want: []int{100},
+		},
+		{
+			name: "conditional error with Or - error case",
+			parser: Or(
+				Label("number", Digit()),
+				Expected[int]("valid identifier"),
+			),
+			src:        []string{"invalid"},
+			wantErr:    true,
+			wantErrMsg: "valid identifier",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			_, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Expected/Fail error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.wantErrMsg != "" {
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+			}
+			if !tt.wantErr && tt.want != nil {
+				// Convert results for comparison
+				var convertedResult []int
+				for _, token := range pc.Results {
+					if token.Val != 0 {
+						convertedResult = append(convertedResult, token.Val)
+					}
+				}
+				if len(convertedResult) > 0 {
+					assert.Equal(t, tt.want, convertedResult)
+				}
+			}
+		})
+	}
+}
+
+func TestAdvancedErrorPatterns(t *testing.T) {
+	tests := []struct {
+		name       string
+		parser     Parser[int]
+		src        []string
+		wantErr    bool
+		wantErrMsg string
+		want       []int
+	}{
+		{
+			name: "fallback to specific error message",
+			parser: Or(
+				Label("number", Digit()),              // 最初に数値を試す（ラベル付き）
+				Label("text", String()),               // 次に文字列を試す（ラベル付き）
+				Expected[int]("number or identifier"), // どちらでもない場合は特定のエラー
+			),
+			src:  []string{"symbol"}, // この場合StringがVal=0で成功するが、Labelでラベル化される
+			want: []int{0},           // String parser produces Val=0
+		},
+		{
+			name: "true fallback error - no valid alternatives",
+			parser: Or(
+				Seq(Digit(), Operator()),          // 数値+演算子のペア
+				Seq(String(), Digit()),            // 文字列+数値のペア
+				Expected[int]("valid expression"), // どちらでもない場合
+			),
+			src:        []string{"invalid"}, // 単一の無効なトークン
+			wantErr:    true,
+			wantErrMsg: "valid expression",
+		},
+		{
+			name: "required closing parenthesis",
+			parser: Seq(
+				Label("opening parenthesis", Operator()), // "+" を開き括弧として使用
+				Digit(),
+				Or(
+					Label("closing parenthesis", Operator()), // "-" を閉じ括弧として使用
+					Expected[int]("closing parenthesis"),     // 見つからない場合の明確なエラー
+				),
+			),
+			src:        []string{"+", "100", "invalid"},
+			wantErr:    true,
+			wantErrMsg: "closing parenthesis",
+		},
+		{
+			name: "syntax error in expression",
+			parser: Or(
+				Seq(Digit(), Operator(), Digit()),       // 正常な式
+				Seq(Digit(), Expected[int]("operator")), // 数値の後に演算子がない
+			),
+			src:        []string{"100", "invalid"},
+			wantErr:    true,
+			wantErrMsg: "operator",
+		},
+		{
+			name: "conditional feature availability",
+			parser: Or(
+				Digit(), // 実装済み機能
+				Fail[int]("advanced expressions not implemented in this version"), // 未実装機能
+			),
+			src:        []string{"function_call"},
+			wantErr:    true,
+			wantErrMsg: "not implemented",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.TraceEnable = true
+			result, err := EvaluateWithRawTokens(pc, tt.src, tt.parser)
+			if testing.Verbose() {
+				t.Log(pc.DumpTraceAsText())
+			}
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AdvancedErrorPatterns error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.wantErrMsg != "" {
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+			}
+			if !tt.wantErr && tt.want != nil {
+				assert.Equal(t, tt.want, result)
+			}
 		})
 	}
 }

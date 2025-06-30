@@ -1,36 +1,37 @@
-# Parser Combinator Library for Go
+# Go用パーサコンビネータライブラリ
 
-A powerful and flexible parser combinator library for Go, specifically designed for building parsers that work with pre-tokenized input to construct Abstract Syntax Trees (ASTs).
+事前にトークン化された入力から抽象構文木（AST）を構築するために特別に設計された、強力で柔軟なGo用パーサコンビネータライブラリです。
 
-## Features
+## 特徴
 
-- **Token-based parsing**: Works with pre-tokenized input rather than raw strings
-- **Type-safe**: Leverages Go's generics for type safety
-- **Comprehensive error handling**: Advanced error reporting with custom messages
-- **Debugging support**: Built-in tracing capabilities
-- **Recovery mechanisms**: Error recovery for robust parsing
-- **Lookahead support**: Positive and negative lookahead operations
-- **Composable**: Easy to combine simple parsers into complex ones
+- **トークンベースのパーシング**: 生の文字列ではなく、事前にトークン化された入力で動作
+- **型安全**: Goのジェネリクスを活用した型安全性
+- **包括的なエラーハンドリング**: カスタムメッセージによる高度なエラー報告
+- **デバッグサポート**: 組み込まれたトレース機能
+- **復旧メカニズム**: 堅牢なパーシングのためのエラー復旧
+- **先読みサポート**: 正と負の先読み操作
+- **組み合わせ可能**: 単純なパーサーを複雑なものに簡単に組み合わせ
 
-## Installation
+## インストール
 
 ```bash
 go get github.com/shibukawa/parsercombinator
 ```
 
-## Quick Start
+## クイックスタート
 
 ```go
 package main
 
 import (
     "fmt"
+    "strconv"
     pc "github.com/shibukawa/parsercombinator"
 )
 
-// Define a simple calculator parser
+// 簡単な計算機パーサーを定義
 func main() {
-    // Create basic parsers
+    // 基本パーサーを作成
     digit := pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
         if src[0].Type == "raw" {
             i, err := strconv.Atoi(src[0].Raw)
@@ -49,80 +50,80 @@ func main() {
         return 0, nil, pc.NewErrNotMatch("operator", src[0].Raw, src[0].Pos)
     })
 
-    // Combine parsers
+    // パーサーを組み合わせ
     expression := pc.Seq(digit, operator, digit)
 
-    // Parse input
+    // 入力をパース
     context := pc.NewParseContext[int]()
     result, err := pc.EvaluateWithRawTokens(context, []string{"5", "+", "3"}, expression)
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
+        fmt.Printf("エラー: %v\n", err)
         return
     }
     
-    fmt.Printf("Result: %v\n", result) // [5, 3] (operator values are 0)
+    fmt.Printf("結果: %v\n", result) // [5, 3] (演算子の値は0)
 }
 ```
 
-## Core Components
+## コアコンポーネント
 
-### Parser Function
+### パーサー関数
 
-The core type is `Parser[T]`:
+核となる型は `Parser[T]` です：
 
 ```go
 type Parser[T any] func(*ParseContext[T], []Token[T]) (consumed int, newTokens []Token[T], err error)
 ```
 
-### Token Structure
+### トークン構造
 
 ```go
 type Token[T any] struct {
-    Type string  // Token type identifier
-    Pos  *Pos    // Position information
-    Raw  string  // Original raw text
-    Val  T       // Parsed value
+    Type string  // トークンタイプ識別子
+    Pos  *Pos    // 位置情報
+    Raw  string  // 元の生テキスト
+    Val  T       // パースされた値
 }
 ```
 
-### Parse Context
+### パースコンテキスト
 
 ```go
 type ParseContext[T any] struct {
-    Tokens         []Token[T]     // Input tokens
-    Pos            int            // Current position
-    RemainedTokens []Token[T]     // Remaining tokens after parsing
-    Results        []Token[T]     // Parsed result tokens
-    Traces         []*TraceInfo   // Debug traces
-    Errors         []*ParseError  // Collected errors
-    TraceEnable    bool           // Enable/disable tracing
+    Tokens         []Token[T]     // 入力トークン
+    Pos            int            // 現在の位置
+    RemainedTokens []Token[T]     // パース後の残りトークン
+    Results        []Token[T]     // パース結果トークン
+    Traces         []*TraceInfo   // デバッグトレース
+    Errors         []*ParseError  // 収集されたエラー
+    TraceEnable    bool           // トレースの有効/無効
 }
 ```
 
-## Basic Combinators
+## 基本コンビネータ
 
-### Sequence (`Seq`)
+### シーケンス (`Seq`)
 
-Matches parsers in sequence:
-
-```go
-parser := pc.Seq(digit, operator, digit) // Matches: digit operator digit
-```
-
-### Choice (`Or`)
-
-Tries parsers in order, returns first successful match:
+パーサーを順番にマッチ：
 
 ```go
-parser := pc.Or(digit, string, identifier) // Matches any of the alternatives
+parser := pc.Seq(digit, operator, digit) // マッチ: digit operator digit
 ```
 
-### Repetition
+### 選択 (`Or`)
 
-- `ZeroOrMore`: Matches zero or more occurrences
-- `OneOrMore`: Matches one or more occurrences  
-- `Repeat`: Matches with specific min/max counts
-- `Optional`: Matches zero or one occurrence
+パーサーを順番に試し、最初に成功したマッチを返す：
+
+```go
+parser := pc.Or(digit, string, identifier) // 選択肢のいずれかにマッチ
+```
+
+### 繰り返し
+
+- `ZeroOrMore`: 0回以上の出現にマッチ
+- `OneOrMore`: 1回以上の出現にマッチ
+- `Repeat`: 特定の最小/最大回数でマッチ
+- `Optional`: 0回または1回の出現にマッチ
 
 ```go
 numbers := pc.ZeroOrMore("numbers", digit)
@@ -131,70 +132,70 @@ exactlyThree := pc.Repeat("exactly-three", 3, 3, digit)
 maybeDigit := pc.Optional(digit)
 ```
 
-## Advanced Features
+## 高度な機能
 
-### Lookahead Operations
+### 先読み操作
 
 ```go
-// Positive lookahead - check without consuming
+// 正の先読み - 消費せずにチェック
 parser := pc.Seq(
-    pc.Lookahead(keyword), // Check for keyword
-    actualParser,          // Then parse normally
+    pc.Lookahead(keyword), // キーワードをチェック
+    actualParser,          // 通常通りパース
 )
 
-// Negative lookahead - ensure something doesn't follow
+// 負の先読み - 何かが続かないことを確認
 parser := pc.Seq(
     identifier,
-    pc.NotFollowedBy(digit), // Identifier not followed by digit
+    pc.NotFollowedBy(digit), // 識別子の後に数字が続かない
 )
 
-// Peek - get result without consuming
+// ピーク - 消費せずに結果を取得
 parser := pc.Seq(
-    pc.Peek(nextToken), // See what's coming
-    conditionalParser,   // Parse based on peek result
+    pc.Peek(nextToken), // 次に来るものを確認
+    conditionalParser,   // ピーク結果に基づいてパース
 )
 ```
 
-### Error Handling and User-Friendly Messages
+### エラーハンドリングとユーザーフレンドリーなメッセージ
 
 ```go
-// Label for better error messages
-numberParser := pc.Label("number", digit)
+// より良いエラーメッセージのためのラベル
+numberParser := pc.Label("数値", digit)
 
-// Expected - for specific error messages
+// 特定のエラーメッセージのためのExpected
 parser := pc.Or(
     validExpression,
-    pc.Expected[int]("closing parenthesis"),
+    pc.Expected[int]("閉じ括弧"),
 )
 
-// Fail - for explicit failures
+// 明示的な失敗のためのFail
 parser := pc.Or(
     implementedFeature,
-    pc.Fail[int]("feature not implemented in this version"),
+    pc.Fail[int]("このバージョンでは機能が実装されていません"),
 )
 ```
 
-### Error Recovery
+### エラー復旧
 
 ```go
-// Recover from errors and continue parsing
+// エラーから復旧してパースを継続
 parser := pc.Recover(
-    pc.Digit(),        // Precondition check
-    parseStatement,    // Main parsing logic
-    pc.Until(";"),     // Recovery: skip until semicolon
+    pc.Digit(),        // 前提条件チェック
+    parseStatement,    // メインのパースロジック
+    pc.Until(";"),     // 復旧: セミコロンまでスキップ
 )
 ```
 
-### Transformation
+### 変換
 
-Transform parsed results:
+パース結果を変換：
 
 ```go
-// Transform tokens
+// トークンを変換
 addParser := pc.Trans(
     pc.Seq(digit, operator, digit),
     func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
-        result := tokens[0].Val + tokens[2].Val // Add the numbers
+        result := tokens[0].Val + tokens[2].Val // 数値を加算
         return []pc.Token[int]{{
             Type: "result",
             Pos:  tokens[0].Pos,
@@ -204,10 +205,10 @@ addParser := pc.Trans(
 )
 ```
 
-### Recursive Parsers with Alias
+### エイリアスによる再帰パーサー
 
 ```go
-// Define recursive grammar
+// 再帰文法を定義
 expressionBody, expression := pc.NewAlias[int]("expression")
 
 parser := expressionBody(
@@ -215,41 +216,41 @@ parser := expressionBody(
         digit,
         pc.Seq(
             pc.Literal("("),
-            expression, // Recursive reference
+            expression, // 再帰参照
             pc.Literal(")"),
         ),
     ),
 )
 ```
 
-### Debugging and Tracing
+### デバッグとトレース
 
 ```go
 context := pc.NewParseContext[int]()
-context.TraceEnable = true // Enable tracing
+context.TraceEnable = true // トレースを有効化
 
 result, err := pc.EvaluateWithRawTokens(context, input, parser)
 
-// Print trace information
-context.DumpTrace() // Prints to stdout
-traceText := context.DumpTraceAsText() // Get as string
+// トレース情報を出力
+context.DumpTrace() // 標準出力に出力
+traceText := context.DumpTraceAsText() // 文字列として取得
 ```
 
-## Error Types
+## エラータイプ
 
-The library defines several error types:
+ライブラリは複数のエラータイプを定義しています：
 
-- `ErrNotMatch`: Parser doesn't match (recoverable)
-- `ErrRepeatCount`: Repetition count not met (recoverable) 
-- `ErrCritical`: Critical error (not recoverable)
+- `ErrNotMatch`: パーサーがマッチしない（復旧可能）
+- `ErrRepeatCount`: 繰り返し回数が条件を満たさない（復旧可能）
+- `ErrCritical`: 致命的エラー（復旧不可能）
 
 ```go
-// Create custom errors
-err := pc.NewErrNotMatch("expected", "actual", position)
-err := pc.NewErrCritical("fatal error", position)
+// カスタムエラーを作成
+err := pc.NewErrNotMatch("期待値", "実際値", position)
+err := pc.NewErrCritical("致命的エラー", position)
 ```
 
-## Complete Example: Mathematical Expressions
+## 完全な例: 数式表現
 
 ```go
 package main
@@ -265,11 +266,11 @@ func Digit() pc.Parser[int] {
         if src[0].Type == "raw" {
             i, err := strconv.Atoi(src[0].Raw)
             if err != nil {
-                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
+                return 0, nil, pc.NewErrNotMatch("整数", src[0].Raw, src[0].Pos)
             }
             return 1, []pc.Token[int]{{Type: "digit", Pos: src[0].Pos, Val: i}}, nil
         }
-        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
+        return 0, nil, pc.NewErrNotMatch("数値", src[0].Type, src[0].Pos)
     })
 }
 
@@ -281,7 +282,7 @@ func Operator() pc.Parser[int] {
                 return 1, []pc.Token[int]{{Type: "operator", Pos: src[0].Pos, Raw: src[0].Raw}}, nil
             }
         }
-        return 0, nil, pc.NewErrNotMatch("operator", src[0].Raw, src[0].Pos)
+        return 0, nil, pc.NewErrNotMatch("演算子", src[0].Raw, src[0].Pos)
     })
 }
 
@@ -314,32 +315,32 @@ func main() {
     result, err := pc.EvaluateWithRawTokens(context, input, Expression())
     
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
+        fmt.Printf("エラー: %v\n", err)
         context.DumpTrace()
         return
     }
     
-    fmt.Printf("Result: %d\n", result[0]) // Output: 15
+    fmt.Printf("結果: %d\n", result[0]) // 出力: 15
 }
 ```
 
-## Best Practices
+## ベストプラクティス
 
-1. **Use Labels**: Always use `Label()` for user-facing parsers to provide clear error messages
-2. **Enable Tracing**: Use tracing during development to understand parser behavior
-3. **Handle Errors Gracefully**: Use `Expected()` and `Fail()` to provide meaningful error messages
-4. **Compose Incrementally**: Build complex parsers from simple, well-tested components
-5. **Use Recovery**: Implement error recovery for robust parsing of malformed input
-6. **Type Safety**: Leverage Go's type system to catch errors at compile time
+1. **ラベルを使用**: ユーザー向けパーサーには常に `Label()` を使用して明確なエラーメッセージを提供
+2. **トレースを有効化**: 開発中はトレースを使用してパーサーの動作を理解
+3. **エラーを適切に処理**: `Expected()` と `Fail()` を使用して意味のあるエラーメッセージを提供
+4. **段階的に構成**: 単純でテスト済みのコンポーネントから複雑なパーサーを構築
+5. **復旧を使用**: 不正な入力の堅牢なパーシングのためにエラー復旧を実装
+6. **型安全性**: Goの型システムを活用してコンパイル時にエラーをキャッチ
 
-## Practical Compiler Construction Patterns
+## 実践的なコンパイラ構築パターン
 
-### Real-world AST Construction from Token Streams
+### トークン列からAST構築の実例
 
-In actual compilers, AST construction from token streams often follows staged patterns like these:
+実際のコンパイラでは、トークン列から段階的にASTを構築することが多く、以下のようなパターンが有効です：
 
 ```go
-// AST Node definitions
+// ASTノードの定義
 type ASTNode interface {
     Type() string
     Position() *pc.Pos
@@ -368,16 +369,16 @@ func (n *LiteralNode) Type() string { return "Literal" }
 func (n *LiteralNode) Position() *pc.Pos { return n.pos }
 func (n *LiteralNode) String() string { return fmt.Sprintf("%v", n.value) }
 
-// Staged AST construction parsers
+// 段階的AST構築のためのパーサー
 func NumberLiteral() pc.Parser[ASTNode] {
     return pc.Trans(
-        pc.Label("number literal", Digit()),
+        pc.Label("数値リテラル", Digit()),
         func(pctx *pc.ParseContext[ASTNode], tokens []pc.Token[ASTNode]) ([]pc.Token[ASTNode], error) {
-            // Extract value from original token and create new AST node
+            // 元のトークンから値を取得し、新しいASTノードを作成
             digitToken := tokens[0]
             astNode := &LiteralNode{
                 pos:   digitToken.Pos,
-                value: digitToken.Val, // Preserve original int value
+                value: digitToken.Val, // 元のint値を保持
             }
             
             return []pc.Token[ASTNode]{{
@@ -393,12 +394,12 @@ func BinaryExpression() pc.Parser[ASTNode] {
     return pc.Trans(
         pc.Seq(NumberLiteral(), Operator(), NumberLiteral()),
         func(pctx *pc.ParseContext[ASTNode], tokens []pc.Token[ASTNode]) ([]pc.Token[ASTNode], error) {
-            // Reference existing AST nodes to build new node
-            leftNode := tokens[0].Val.(ASTNode)    // Old node reference
-            opToken := tokens[1]                   // Operator token
-            rightNode := tokens[2].Val.(ASTNode)   // Old node reference
+            // 既存のASTノードを参照して新しいノードを構築
+            leftNode := tokens[0].Val.(ASTNode)    // 旧ノード参照
+            opToken := tokens[1]                   // 演算子トークン
+            rightNode := tokens[2].Val.(ASTNode)   // 旧ノード参照
             
-            // Create new AST node
+            // 新しいASTノードを作成
             binaryNode := &BinaryOpNode{
                 pos:   leftNode.Position(),
                 left:  leftNode,
@@ -416,12 +417,12 @@ func BinaryExpression() pc.Parser[ASTNode] {
 }
 ```
 
-### Complex AST Construction Patterns
+### 複雑なAST構築パターン
 
-For more complex structures, staged construction makes management easier:
+より複雑な構造の場合、段階的に構築することで管理しやすくなります：
 
 ```go
-// Function call node
+// 関数呼び出しノード
 type FunctionCallNode struct {
     pos       *pc.Pos
     name      string
@@ -438,7 +439,7 @@ func (n *FunctionCallNode) String() string {
     return fmt.Sprintf("%s(%s)", n.name, strings.Join(args, ", "))
 }
 
-// Argument list construction
+// 引数リストの構築
 func ArgumentList() pc.Parser[ASTNode] {
     return pc.Trans(
         pc.Seq(
@@ -452,12 +453,12 @@ func ArgumentList() pc.Parser[ASTNode] {
         func(pctx *pc.ParseContext[ASTNode], tokens []pc.Token[ASTNode]) ([]pc.Token[ASTNode], error) {
             var arguments []ASTNode
             
-            // If optional arguments exist
+            // オプショナルな引数がある場合
             if len(tokens) > 2 && tokens[1].Type == "ast_node" {
-                // First argument
+                // 最初の引数
                 arguments = append(arguments, tokens[1].Val.(ASTNode))
                 
-                // Additional arguments (, expression repetitions)
+                // 追加の引数（, expression の繰り返し）
                 for i := 2; i < len(tokens)-1; i += 2 {
                     if tokens[i].Type == "ast_node" {
                         arguments = append(arguments, tokens[i].Val.(ASTNode))
@@ -465,7 +466,7 @@ func ArgumentList() pc.Parser[ASTNode] {
                 }
             }
             
-            // Create meta-node representing argument list
+            // 引数リストを表すメタノードを作成
             argListNode := &ArgumentListNode{
                 pos:  tokens[0].Pos,
                 args: arguments,
@@ -480,7 +481,7 @@ func ArgumentList() pc.Parser[ASTNode] {
     )
 }
 
-// Function call construction
+// 関数呼び出しの構築
 func FunctionCall() pc.Parser[ASTNode] {
     return pc.Trans(
         pc.Seq(Identifier(), ArgumentList()),
@@ -504,26 +505,26 @@ func FunctionCall() pc.Parser[ASTNode] {
 }
 ```
 
-### Post-Tree Processing Patterns
+### 木構造後の処理パターン
 
-For processing after tree construction, these approaches are effective:
+一度木構造になった後の処理については、以下のようなアプローチが有効です：
 
 ```go
-// Visitor pattern for AST processing
+// Visitor パターンによるAST処理
 type ASTVisitor interface {
     VisitBinaryOp(node *BinaryOpNode) error
     VisitLiteral(node *LiteralNode) error
     VisitFunctionCall(node *FunctionCallNode) error
 }
 
-// Type checker example
+// 型チェッカーの例
 type TypeChecker struct {
     errors []error
     symbolTable map[string]Type
 }
 
 func (tc *TypeChecker) VisitBinaryOp(node *BinaryOpNode) error {
-    // Process left and right child nodes recursively
+    // 左右の子ノードを再帰的に処理
     if err := node.left.Accept(tc); err != nil {
         return err
     }
@@ -531,36 +532,36 @@ func (tc *TypeChecker) VisitBinaryOp(node *BinaryOpNode) error {
         return err
     }
     
-    // Type checking logic
+    // 型チェックロジック
     leftType := tc.getNodeType(node.left)
     rightType := tc.getNodeType(node.right)
     
     if !tc.isCompatible(leftType, rightType, node.op) {
-        return fmt.Errorf("type error: %s and %s cannot be used with operator %s", 
+        return fmt.Errorf("型エラー: %s と %s は演算子 %s で使用できません", 
                          leftType, rightType, node.op)
     }
     
     return nil
 }
 
-// Transform pattern for AST transformation
+// Transform パターンによるAST変換
 type ASTTransformer interface {
     Transform(node ASTNode) (ASTNode, error)
 }
 
-// Optimizer example
+// 最適化器の例
 type Optimizer struct{}
 
 func (o *Optimizer) Transform(node ASTNode) (ASTNode, error) {
     switch n := node.(type) {
     case *BinaryOpNode:
-        // Constant folding optimization
+        // 定数畳み込み最適化
         if isConstant(n.left) && isConstant(n.right) {
             result := evaluateConstant(n)
             return &LiteralNode{pos: n.pos, value: result}, nil
         }
         
-        // Recursively optimize child nodes
+        // 子ノードを再帰的に最適化
         optimizedLeft, err := o.Transform(n.left)
         if err != nil {
             return nil, err
@@ -583,62 +584,62 @@ func (o *Optimizer) Transform(node ASTNode) (ASTNode, error) {
 }
 ```
 
-### Multi-Pass Processing Patterns
+### マルチパス処理のパターン
 
-Real compilers typically use multiple passes for processing:
+実際のコンパイラでは、複数のパスで処理することが一般的です：
 
 ```go
-// Main compiler processing
+// コンパイラのメイン処理
 func CompileProgram(input []string) (*Program, error) {
-    // Pass 1: Syntax analysis (using parser combinators)
+    // パス1: 構文解析（パーサコンビネータ使用）
     context := pc.NewParseContext[ASTNode]()
     ast, err := pc.EvaluateWithRawTokens(context, input, Program())
     if err != nil {
-        return nil, fmt.Errorf("syntax analysis error: %w", err)
+        return nil, fmt.Errorf("構文解析エラー: %w", err)
     }
     
     programNode := ast[0].Val.(*ProgramNode)
     
-    // Pass 2: Symbol table construction
+    // パス2: シンボルテーブル構築
     symbolBuilder := &SymbolTableBuilder{}
     if err := programNode.Accept(symbolBuilder); err != nil {
-        return nil, fmt.Errorf("symbol analysis error: %w", err)
+        return nil, fmt.Errorf("シンボル解析エラー: %w", err)
     }
     
-    // Pass 3: Type checking
+    // パス3: 型チェック
     typeChecker := &TypeChecker{symbolTable: symbolBuilder.table}
     if err := programNode.Accept(typeChecker); err != nil {
-        return nil, fmt.Errorf("type checking error: %w", err)
+        return nil, fmt.Errorf("型チェックエラー: %w", err)
     }
     
-    // Pass 4: Optimization
+    // パス4: 最適化
     optimizer := &Optimizer{}
     optimizedAST, err := optimizer.Transform(programNode)
     if err != nil {
-        return nil, fmt.Errorf("optimization error: %w", err)
+        return nil, fmt.Errorf("最適化エラー: %w", err)
     }
     
-    // Pass 5: Code generation
+    // パス5: コード生成
     codeGenerator := &CodeGenerator{}
     code, err := codeGenerator.Generate(optimizedAST)
     if err != nil {
-        return nil, fmt.Errorf("code generation error: %w", err)
+        return nil, fmt.Errorf("コード生成エラー: %w", err)
     }
     
     return &Program{AST: optimizedAST, Code: code}, nil
 }
 ```
 
-This way, parser combinators are used for the syntax analysis stage, and subsequent processing combines traditional AST processing patterns (Visitor, Transform, Multi-pass) to build practical compilers.
+このように、パーサコンビネータは構文解析段階で使用し、その後の処理は従来のAST処理パターン（Visitor、Transform、マルチパス）を組み合わせることで、実用的なコンパイラを構築できます。
 
-## Structured Data Validation Patterns
+## 構造化データの検証パターン
 
-### Tree Structure Serialization for Validation
+### ツリー構造の直列化による検証
 
-The approach you suggested is highly effective. Here's how to serialize tree structures with pseudo-nodes for parser validation:
+ご提案いただいたアプローチは非常に有効です。ツリー構造を疑似ノードで直列化してパーサで検証する方法：
 
 ```go
-// Tree structure representation
+// ツリー構造を表現する型
 type TreeNode struct {
     Type     string
     Value    interface{}
@@ -646,20 +647,20 @@ type TreeNode struct {
     Pos      *pc.Pos
 }
 
-// Serialization pseudo-tokens
+// 直列化用の疑似トークン
 type SerializedToken struct {
     Type  string  // "open", "close", "leaf"
-    Node  string  // Node name
+    Node  string  // ノード名
     Value interface{}
     Pos   *pc.Pos
 }
 
-// Serialize tree (DFS order to pseudo-token stream)
+// ツリーを直列化（DFS順で疑似トークン列に変換）
 func SerializeTree(node *TreeNode) []SerializedToken {
     var tokens []SerializedToken
     
     if len(node.Children) == 0 {
-        // Leaf node
+        // 葉ノード
         tokens = append(tokens, SerializedToken{
             Type:  "leaf",
             Node:  node.Type,
@@ -667,7 +668,7 @@ func SerializeTree(node *TreeNode) []SerializedToken {
             Pos:   node.Pos,
         })
     } else {
-        // Internal node: start
+        // 内部ノード：開始
         tokens = append(tokens, SerializedToken{
             Type:  "open",
             Node:  node.Type,
@@ -675,12 +676,12 @@ func SerializeTree(node *TreeNode) []SerializedToken {
             Pos:   node.Pos,
         })
         
-        // Recursively process child nodes
+        // 子ノードを再帰的に処理
         for _, child := range node.Children {
             tokens = append(tokens, SerializeTree(child)...)
         }
         
-        // Internal node: end
+        // 内部ノード：終了
         tokens = append(tokens, SerializedToken{
             Type: "close",
             Node: node.Type,
@@ -691,43 +692,43 @@ func SerializeTree(node *TreeNode) []SerializedToken {
     return tokens
 }
 
-// Validator for serialized tokens
+// 直列化されたトークンに対するバリデータ
 func ValidateHTMLStructure() pc.Parser[bool] {
-    // HTML tag start
+    // HTMLタグの開始
     htmlOpen := pc.Trace("html_open", func(pctx *pc.ParseContext[bool], src []pc.Token[bool]) (int, []pc.Token[bool], error) {
         token := src[0].Val.(SerializedToken)
         if token.Type == "open" && token.Node == "html" {
             return 1, []pc.Token[bool]{{Type: "validated", Val: true}}, nil
         }
-        return 0, nil, pc.NewErrNotMatch("HTML start tag", token.Node, src[0].Pos)
+        return 0, nil, pc.NewErrNotMatch("HTML開始タグ", token.Node, src[0].Pos)
     })
     
-    // HTML tag end
+    // HTMLタグの終了
     htmlClose := pc.Trace("html_close", func(pctx *pc.ParseContext[bool], src []pc.Token[bool]) (int, []pc.Token[bool], error) {
         token := src[0].Val.(SerializedToken)
         if token.Type == "close" && token.Node == "html" {
             return 1, []pc.Token[bool]{{Type: "validated", Val: true}}, nil
         }
-        return 0, nil, pc.NewErrNotMatch("HTML end tag", token.Node, src[0].Pos)
+        return 0, nil, pc.NewErrNotMatch("HTML終了タグ", token.Node, src[0].Pos)
     })
     
-    // body element validation
+    // body要素の検証
     bodyElement := pc.Seq(
         pc.Literal("body_open"),
         pc.ZeroOrMore("body_content", pc.Or(textContent, divElement)),
         pc.Literal("body_close"),
     )
     
-    // Complete HTML structure validation
+    // 完全なHTML構造の検証
     return pc.Seq(htmlOpen, headElement, bodyElement, htmlClose)
 }
 
-// Execute validation
+// 検証の実行
 func ValidateHTMLTree(tree *TreeNode) error {
-    // Serialize tree
+    // ツリーを直列化
     tokens := SerializeTree(tree)
     
-    // Validate with parser combinators
+    // パーサコンビネータで検証
     context := pc.NewParseContext[bool]()
     _, err := pc.EvaluateWithTokens(context, tokens, ValidateHTMLStructure())
     
@@ -735,40 +736,40 @@ func ValidateHTMLTree(tree *TreeNode) error {
 }
 ```
 
-### Schema-Based Structure Validation
+### スキーマベースの構造検証
 
-More general schema validation patterns:
+より一般的なスキーマ検証のパターン：
 
 ```go
-// Schema definition
+// スキーマ定義
 type Schema struct {
     Type       string             // "object", "array", "string", etc.
-    Properties map[string]*Schema // Object properties
-    Items      *Schema            // Array element schema
-    Required   []string           // Required fields
-    MinItems   int               // Minimum array elements
-    MaxItems   int               // Maximum array elements
+    Properties map[string]*Schema // オブジェクトのプロパティ
+    Items      *Schema            // 配列の要素スキーマ
+    Required   []string           // 必須フィールド
+    MinItems   int               // 配列の最小要素数
+    MaxItems   int               // 配列の最大要素数
 }
 
-// JSON-like data structure
+// JSON風のデータ構造
 type DataNode struct {
     Type  string                 // "object", "array", "string", "number", "boolean"
-    Value interface{}            // Actual value
-    Props map[string]*DataNode   // Object properties
-    Items []*DataNode            // Array elements
+    Value interface{}            // 実際の値
+    Props map[string]*DataNode   // オブジェクトのプロパティ
+    Items []*DataNode            // 配列の要素
     Pos   *pc.Pos
 }
 
-// Schema validation parser generator
+// スキーマ検証用のパーサ生成
 func CreateSchemaValidator(schema *Schema) pc.Parser[bool] {
     return pc.Trace(fmt.Sprintf("validate_%s", schema.Type), 
         func(pctx *pc.ParseContext[bool], src []pc.Token[bool]) (int, []pc.Token[bool], error) {
             data := src[0].Val.(*DataNode)
             
-            // Type check
+            // 型チェック
             if data.Type != schema.Type {
                 return 0, nil, pc.NewErrNotMatch(
-                    fmt.Sprintf("type %s", schema.Type), 
+                    fmt.Sprintf("型 %s", schema.Type), 
                     data.Type, 
                     data.Pos,
                 )
@@ -786,41 +787,41 @@ func CreateSchemaValidator(schema *Schema) pc.Parser[bool] {
 }
 
 func validateObject(schema *Schema, data *DataNode, pctx *pc.ParseContext[bool]) (int, []pc.Token[bool], error) {
-    // Required field validation
+    // 必須フィールドの検証
     for _, required := range schema.Required {
         if _, exists := data.Props[required]; !exists {
             return 0, nil, pc.NewErrCritical(
-                fmt.Sprintf("required field '%s' not found", required),
+                fmt.Sprintf("必須フィールド '%s' が見つかりません", required),
                 data.Pos,
             )
         }
     }
     
-    // Validate each property
+    // 各プロパティの検証
     for propName, propData := range data.Props {
         propSchema, exists := schema.Properties[propName]
         if !exists {
             return 0, nil, pc.NewErrNotMatch(
-                "valid property",
+                "有効なプロパティ",
                 propName,
                 propData.Pos,
             )
         }
         
-        // Recursively validate property
+        // 再帰的にプロパティを検証
         validator := CreateSchemaValidator(propSchema)
         _, _, err := validator(pctx, []pc.Token[bool]{{Val: propData, Pos: propData.Pos}})
         if err != nil {
-            return 0, nil, fmt.Errorf("property '%s': %w", propName, err)
+            return 0, nil, fmt.Errorf("プロパティ '%s': %w", propName, err)
         }
     }
     
     return 1, []pc.Token[bool]{{Type: "validated_object", Val: true}}, nil
 }
 
-// Configuration file validation example
+// 設定ファイルの検証例
 func ValidateConfigFile() pc.Parser[bool] {
-    // Configuration file schema definition
+    // 設定ファイルのスキーマ定義
     configSchema := &Schema{
         Type: "object",
         Required: []string{"server", "database"},
@@ -845,16 +846,16 @@ func ValidateConfigFile() pc.Parser[bool] {
         },
     }
     
-    return pc.Label("configuration file", CreateSchemaValidator(configSchema))
+    return pc.Label("設定ファイル", CreateSchemaValidator(configSchema))
 }
 ```
 
-### Flat Structure Partial Validation
+### フラット構造での部分検証
 
-Methods for partial validation of existing structured data:
+既存の構造化データに対して部分的な検証を行う方法：
 
 ```go
-// CSV data row validation
+// CSVデータの行検証
 type CSVRow struct {
     Fields []string
     LineNo int
@@ -865,16 +866,16 @@ func ValidateCSVRow(expectedColumns []string, validators map[string]pc.Parser[bo
         pc.Trace("csv_row", func(pctx *pc.ParseContext[bool], src []pc.Token[bool]) (int, []pc.Token[bool], error) {
             row := src[0].Val.(*CSVRow)
             
-            // Column count check
+            // カラム数チェック
             if len(row.Fields) != len(expectedColumns) {
                 return 0, nil, pc.NewErrNotMatch(
-                    fmt.Sprintf("%d fields", len(expectedColumns)),
-                    fmt.Sprintf("%d fields", len(row.Fields)),
+                    fmt.Sprintf("%d個のフィールド", len(expectedColumns)),
+                    fmt.Sprintf("%d個のフィールド", len(row.Fields)),
                     &pc.Pos{Line: row.LineNo},
                 )
             }
             
-            // Validate each field
+            // 各フィールドの検証
             for i, field := range row.Fields {
                 columnName := expectedColumns[i]
                 if validator, exists := validators[columnName]; exists {
@@ -887,7 +888,7 @@ func ValidateCSVRow(expectedColumns []string, validators map[string]pc.Parser[bo
                     
                     _, _, err := validator(pctx, []pc.Token[bool]{fieldToken})
                     if err != nil {
-                        return 0, nil, fmt.Errorf("column '%s' (line %d): %w", columnName, row.LineNo, err)
+                        return 0, nil, fmt.Errorf("列 '%s' (行%d): %w", columnName, row.LineNo, err)
                     }
                 }
             }
@@ -900,27 +901,27 @@ func ValidateCSVRow(expectedColumns []string, validators map[string]pc.Parser[bo
     )
 }
 
-// Usage example: User data CSV validation
+// 使用例：ユーザーデータCSVの検証
 func CreateUserCSVValidator() pc.Parser[bool] {
     columns := []string{"name", "email", "age", "active"}
     
     validators := map[string]pc.Parser[bool]{
-        "name": pc.Label("username", validateNonEmptyString()),
-        "email": pc.Label("email address", validateEmail()),
-        "age": pc.Label("age", validatePositiveNumber()),
-        "active": pc.Label("active flag", validateBoolean()),
+        "name": pc.Label("ユーザー名", validateNonEmptyString()),
+        "email": pc.Label("メールアドレス", validateEmail()),
+        "age": pc.Label("年齢", validatePositiveNumber()),
+        "active": pc.Label("有効フラグ", validateBoolean()),
     }
     
     return pc.OneOrMore("csv_rows", ValidateCSVRow(columns, validators))
 }
 ```
 
-### Real-time Validation Patterns
+### リアルタイム検証パターン
 
-Validation for streaming or real-time data:
+ストリーミングデータやリアルタイムデータの検証：
 
 ```go
-// Event stream validation
+// イベントストリームの検証
 type Event struct {
     Type      string
     Timestamp time.Time
@@ -928,17 +929,17 @@ type Event struct {
     Pos       *pc.Pos
 }
 
-// State machine-based sequence validation
+// 状態機械による順序検証
 func ValidateEventSequence() pc.Parser[bool] {
-    // User login flow validation
+    // ユーザーログインフローの検証
     loginFlow := pc.Seq(
-        pc.Label("login start", expectEvent("login_start")),
-        pc.Optional(pc.Label("auth attempt", expectEvent("auth_attempt"))),
+        pc.Label("ログイン開始", expectEvent("login_start")),
+        pc.Optional(pc.Label("認証試行", expectEvent("auth_attempt"))),
         pc.Or(
-            pc.Label("login success", expectEvent("login_success")),
+            pc.Label("ログイン成功", expectEvent("login_success")),
             pc.Seq(
-                pc.Label("login failure", expectEvent("login_failure")),
-                pc.Optional(pc.Label("retry", ValidateEventSequence())), // Recursively allow retry
+                pc.Label("ログイン失敗", expectEvent("login_failure")),
+                pc.Optional(pc.Label("再試行", ValidateEventSequence())), // 再帰的に再試行を許可
             ),
         ),
     )
@@ -957,17 +958,43 @@ func expectEvent(eventType string) pc.Parser[bool] {
 }
 ```
 
-These patterns enable validation of various structured data types:
+これらのパターンにより、様々な構造化データの検証が可能になります：
 
-1. **Tree Serialization**: Validation of complex hierarchical structures
-2. **Schema-Based**: Type-safe validation of JSON/XML-like data  
-3. **Flat Structure**: Validation of tabular data like CSV/TSV
-4. **Real-time**: Validation of event streams and state transitions
+1. **ツリー直列化**: 複雑な階層構造の検証
+2. **スキーマベース**: JSON/XML風データの型安全検証  
+3. **フラット構造**: CSV/TSVなどの表形式データ検証
+4. **リアルタイム**: イベントストリームや状態遷移の検証
 
-## License
+## 使用事例
 
-Apache 2.0 License - see LICENSE file for details.
+このライブラリは以下のような場面で特に有用です：
 
-## Contributing
+- **DSL（ドメイン固有言語）パーサー**: 設定ファイル、クエリ言語、テンプレート言語
+- **プログラミング言語の構文解析**: 言語処理系の構文解析フェーズ
+- **データフォーマットの解析**: カスタムデータフォーマットの構造解析
+- **コード生成ツール**: テンプレートや仕様からのコード生成
+- **バリデーション**: 構造化データの検証とエラー報告
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 設計思想
+
+このライブラリは以下の設計原則に基づいています：
+
+1. **トークンベースアプローチ**: 字句解析と構文解析の分離により、より良い性能とエラー報告を実現
+2. **型安全性**: Goのジェネリクスを活用してコンパイル時の安全性を保証
+3. **組み合わせ可能性**: 小さく再利用可能なコンポーネントから複雑なパーサーを構築
+4. **エラーファースト**: 優れたエラー報告とデバッグ機能を重視
+5. **実用性**: 実際のプロダクションコードで使用できる堅牢性と性能
+
+## ライセンス
+
+Apache 2.0 License - 詳細はLICENSEファイルを参照してください。
+
+## 貢献
+
+貢献を歓迎します！プルリクエストをお気軽に提出してください。
+
+## 関連リソース
+
+- [英語版README](README.md)
+- [APIドキュメント](https://pkg.go.dev/github.com/shibukawa/parsercombinator)
+- [サンプルコード](examples/)
