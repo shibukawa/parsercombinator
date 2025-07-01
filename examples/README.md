@@ -31,6 +31,33 @@
   - 構造化されたデータ形式での出力
   - さらなる処理（最適化、コード生成など）への基盤
 
+### compare_example/
+再帰パーサーの比較例
+
+- **main.go**: `pc.Lazy` vs `pc.NewAlias` の比較デモ
+  - 単純な自己再帰に適した `pc.Lazy` の使用例
+  - 相互再帰や複雑な文法に必要な `pc.NewAlias` の使用例
+  - 両アプローチの適切な使い分け方を実践的に学習
+  - 相互再帰文法の実装例（NewAliasが必要なケース）
+
+### lazy_basic/
+基本的なLazy使用例
+
+- **main.go**: `pc.Lazy`を使用した再帰式パーサー
+  - 四則演算と括弧をサポートする式パーサー
+  - 右再帰を使用した安全な実装パターン
+  - ASTノードの構築と評価の実例
+  - 基本的な再帰パーサーの理解に最適
+
+### test_lazy_example/
+包括的なLazy使用例
+
+- **main.go**: より詳細な`pc.Lazy`の活用例
+  - 複雑な入れ子式の解析
+  - 包括的なテストケース
+  - 実用的なエラーハンドリング
+  - Lazyパターンの応用方法を詳しく学習
+
 ## 実行方法
 
 各サンプルは独立したGoプログラムとして実行できます：
@@ -47,13 +74,28 @@ go run simple_calculator.go
 # コンパイラ例の実行
 cd compiler
 go run simple_math_to_json.go
+
+# 再帰パーサー比較例の実行
+cd compare_example
+go run main.go
+
+# 基本的なLazy使用例の実行
+cd lazy_basic
+go run main.go
+
+# 包括的なLazy使用例の実行
+cd test_lazy_example
+go run main.go
 ```
 
 ## 学習の流れ
 
 1. **basic/**: まず基本的なパーサーコンビネータの概念を理解
-2. **interpreter/**: パースした結果を直接評価する方法を学習
-3. **compiler/**: パース結果をASTという中間表現に変換する方法を学習
+2. **lazy_basic/**: 単純な再帰パーサーの実装方法を学習
+3. **test_lazy_example/**: より複雑なLazy使用例で理解を深める
+4. **compare_example/**: LazyとAliasの使い分けを学習
+5. **interpreter/**: パースした結果を直接評価する方法を学習
+6. **compiler/**: パース結果をASTという中間表現に変換する方法を学習
 
 ## 特徴
 

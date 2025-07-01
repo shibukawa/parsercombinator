@@ -370,241 +370,161 @@ Warning: Transformation safety check failed: potential infinite loop in transfor
 - May produce false positives for complex transformations with external state
 - Performance overhead when enabled (use primarily during development)
 - Only checks immediate re-parsing, not multi-step transformation chains
-### Recursive Parsers with Alias
+### Recursive Parsers with Alias and Lazy
+
+Parser combinators provide two approaches for handling recursive grammars:
+
+#### pc.Lazy - Simple Self-Recursion
+
+For simple self-referential parsers, use `pc.Lazy`:
 
 ```go
-// Define recursive grammar
-expressionBody, expression := pc.NewAlias[int]("expression")
+var expression pc.Parser[Entity]
 
-parser := expressionBody(
-    pc.Or(
-        digit,
+expression = pc.Or(
+    literal(),
+    pc.Trans(
         pc.Seq(
-            pc.Literal("("),
-            expression, // Recursive reference
-            pc.Literal(")"),
+            leftParen(),
+            pc.Lazy(func() pc.Parser[Entity] { return expression }),
+            rightParen(),
         ),
+        func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+            return []pc.Token[Entity]{tokens[1]}, nil
+        },
     ),
 )
 ```
 
-### Debugging and Tracing
+#### pc.NewAlias - Complex and Mutual Recursion
 
+For mutual recursion or complex grammars, use `NewAlias`:
 ```go
-context := pc.NewParseContext[int]()
-context.TraceEnable = true // Enable tracing
+// Define recursive grammar safely
+defineExpr, exprAlias := pc.NewAlias[int]("expression")
 
-result, err := pc.EvaluateWithRawTokens(context, input, parser)
-
-// Print trace information
-context.DumpTrace() // Prints to stdout
-traceText := context.DumpTraceAsText() // Get as string
-```
-
-## Error Types
-
-The library defines several error types:
-
-- `ErrNotMatch`: Parser doesn't match (recoverable)
-- `ErrRepeatCount`: Repetition count not met (recoverable) 
-- `ErrCritical`: Critical error (not recoverable)
-- `ErrStackOverflow`: Recursion depth exceeded maximum limit (prevents infinite loops)
-
-```go
-// Create custom errors
-err := pc.NewErrNotMatch("expected", "actual", position)
-err := pc.NewErrCritical("fatal error", position)
-err := pc.NewErrStackOverflow(currentDepth, maxDepth, position)
-```
-
-## Stack Overflow Protection
-
-The library includes built-in protection against infinite loops in recursive parsers through stack depth limiting.
-
-### Configuration
-
-```go
-// Set custom stack depth limit
-context := pc.NewParseContext[int]()
-context.MaxDepth = 50  // Maximum recursion depth of 50
-
-// Disable limit (set to 0)
-context.MaxDepth = 0   // No limit (use with caution)
-
-// Default limit
-fmt.Println(pc.NewParseContext[int]().MaxDepth) // 1000 (default)
-```
-
-### Error Handling
-
-When the recursion depth exceeds the limit, an `ErrStackOverflow` error is returned:
-
-```go
-result, err := pc.EvaluateWithRawTokens(context, input, parser)
-if err != nil {
-    if errors.Is(err, pc.ErrStackOverflow) {
-        fmt.Printf("Stack overflow detected: %v\n", err)
-        // Handle infinite recursion case
-    }
-}
-```
-
-### Use Cases
-
-This protection is particularly useful for:
-
-- **Left-recursive grammars**: Detecting and preventing infinite left recursion
-- **Malformed input**: Stopping runaway parsing on unexpected input patterns  
-- **Development debugging**: Catching recursive parser logic errors early
-- **Production safety**: Preventing server crashes from malicious or malformed input
-
-### Example: Protected Recursive Parser
-
-```go
-// This parser could potentially loop infinitely on certain inputs
-expressionBody, expression := pc.NewAlias[int]("expression")
-parser := expressionBody(
-    pc.Or(
-        pc.Digit(),                                    // Base case
-        pc.Seq(expression, pc.Operator(), pc.Digit()), // Recursive case (left-recursive!)
-    ),
-)
-
-context := pc.NewParseContext[int]()
-context.MaxDepth = 10 // Low limit for demonstration
-
-// This will be caught and stopped safely
-result, err := pc.EvaluateWithRawTokens(context, []string{"+"}, parser)
-if errors.Is(err, pc.ErrStackOverflow) {
-    fmt.Println("Infinite recursion detected and prevented!")
-}
-```
-
-## Complete Example: Mathematical Expressions
-
-```go
-package main
-
-import (
-    "fmt"
-    "strconv"
-    pc "github.com/shibukawa/parsercombinator"
-)
-
-func Digit() pc.Parser[int] {
-    return pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
-        if src[0].Type == "raw" {
-            i, err := strconv.Atoi(src[0].Raw)
-            if err != nil {
-                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
-            }
-            return 1, []pc.Token[int]{{Type: "digit", Pos: src[0].Pos, Val: i}}, nil
-        }
-        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
-    })
-}
-
-func Operator() pc.Parser[int] {
-    return pc.Trace("operator", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
-        if src[0].Type == "raw" {
-            switch src[0].Raw {
-            case "+", "-", "*", "/":
-                return 1, []pc.Token[int]{{Type: "operator", Pos: src[0].Pos, Raw: src[0].Raw}}, nil
-            }
-        }
-        return 0, nil, pc.NewErrNotMatch("operator", src[0].Raw, src[0].Pos)
-    })
-}
-
-func Expression() pc.Parser[int] {
-    return pc.Trans(
-        pc.Seq(Digit(), Operator(), Digit()),
+// Primary expressions (numbers, parenthesized expressions)
+primaryExpr := pc.Or(
+    digit,
+    pc.Trans(
+        pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")), // Safe recursive reference
         func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
-            left, op, right := tokens[0].Val, tokens[1].Raw, tokens[2].Val
-            var result int
-            switch op {
-            case "+": result = left + right
-            case "-": result = left - right
-            case "*": result = left * right
-            case "/": result = left / right
+            return []pc.Token[int]{tokens[1]}, nil // Return inner expression
+        },
+    ),
+)
+
+// Define the alias (this completes the recursion)
+expression := defineExpr(primaryExpr)
+```
+
+### ⚠️ Critical: Avoiding Left Recursion
+
+**Left recursion causes infinite loops** and must be avoided in parser combinators. Understanding and preventing this is crucial for safe parsing.
+
+#### What Is Left Recursion?
+
+Left recursion occurs when a parser rule directly or indirectly calls itself as the first step in parsing:
+
+```go
+// ❌ DANGEROUS: Direct left recursion
+expressionBody, expression := pc.NewAlias[int]("expression")
+expression = expressionBody(
+    pc.Or(
+        pc.Seq(expression, operator, expression), // ← 'expression' calls itself first!
+        number,
+    ),
+)
+
+// ❌ DANGEROUS: Indirect left recursion
+// A → B C, B → A d   (A indirectly calls itself through B)
+defineA, aliasA := pc.NewAlias[int]("A")
+defineB, aliasB := pc.NewAlias[int]("B")
+
+parserA := defineA(pc.Seq(aliasB, pc.Literal("C")))
+parserB := defineB(pc.Seq(aliasA, pc.Literal("d")))  // ← Indirect recursion!
+```
+
+#### Why Left Recursion is Dangerous
+
+1. **Infinite Construction Loop**: Parsers are Go functions/closures. During construction, left recursion creates an infinite call chain
+2. **Stack Overflow**: The Go runtime stack overflows before any parsing begins
+3. **No Runtime Protection**: This happens at parser construction time, not parse time
+4. **Silent Failure**: Often manifests as mysterious stack overflow errors
+
+#### Safe Expression Parsing Patterns
+
+Use **precedence climbing** and **right recursion** instead:
+
+```go
+// ✅ SAFE: Precedence climbing with iterative patterns
+func CreateSafeExpressionParser() pc.Parser[int] {
+    defineExpr, exprAlias := pc.NewAlias[int]("expr")
+    
+    // Primary expressions (highest precedence)
+    primaryExpr := pc.Or(
+        Number(),
+        pc.Trans( // Parenthesized expressions
+            pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")),
+            func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+                return []pc.Token[int]{tokens[1]}, nil
+            },
+        ),
+    )
+    
+    // Multiplication/Division (higher precedence)
+    mulExpr := pc.Trans(
+        pc.Seq(
+            primaryExpr,
+            pc.ZeroOrMore("mul_ops", pc.Seq(
+                pc.Or(pc.Literal("*"), pc.Literal("/")),
+                primaryExpr,
+            )),
+        ),
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            result := tokens[0].Val
+            for i := 1; i < len(tokens); i += 2 {
+                op := tokens[i].Raw
+                right := tokens[i+1].Val
+                switch op {
+                case "+": result += right
+                case "-": result -= right
+                case "*": result *= right
+                case "/": result /= right
+                }
             }
-            return []pc.Token[int]{{
-                Type: "result",
-                Pos:  tokens[0].Pos,
-                Val:  result,
-            }}, nil
+            return []pc.Token[int]{{Type: "expr", Val: result, Pos: tokens[0].Pos}}, nil
         },
     )
-}
-
-func main() {
-    context := pc.NewParseContext[int]()
-    context.TraceEnable = true
     
-    input := []string{"10", "+", "5"}
-    result, err := pc.EvaluateWithRawTokens(context, input, Expression())
+    // Addition/Subtraction (lower precedence)
+    addExpr := pc.Trans(
+        pc.Seq(
+            mulExpr,
+            pc.ZeroOrMore("add_ops", pc.Seq(
+                pc.Or(pc.Literal("+"), pc.Literal("-")),
+                mulExpr,
+            )),
+        ),
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            result := tokens[0].Val
+            for i := 1; i < len(tokens); i += 2 {
+                op := tokens[i].Raw
+                right := tokens[i+1].Val
+                switch op {
+                case "+": result += right
+                case "-": result -= right
+                }
+            }
+            return []pc.Token[int]{{Type: "result", Val: result, Pos: tokens[0].Pos}}, nil
+        },
+    )
     
-    if err != nil {
-        fmt.Printf("Error: %v\n", err)
-        context.DumpTrace()
-        return
-    }
-    
-    fmt.Printf("Result: %d\n", result[0]) // Output: 15
-}
-```
-
-## Best Practices
-
-1. **Use Labels**: Always use `Label()` for user-facing parsers to provide clear error messages
-2. **Enable Tracing**: Use tracing during development to understand parser behavior
-3. **Handle Errors Gracefully**: Use `Expected()` and `Fail()` to provide meaningful error messages
-4. **Compose Incrementally**: Build complex parsers from simple, well-tested components
-5. **Use Recovery**: Implement error recovery for robust parsing of malformed input
-6. **Type Safety**: Leverage Go's type system to catch errors at compile time
-7. **⚠️ Transformation Safety**: Always change token types in transformations to prevent infinite loops
-   - Never output tokens that could be re-parsed by the same parser
-   - Use stack overflow protection (`MaxDepth`) as a safety net
-   - Enable tracing during development to detect re-parsing patterns
-   - Use automatic safety checks in Safe mode: `context.CheckTransformSafety = true`
-
-## Practical Compiler Construction Patterns
-
-### Real-world AST Construction from Token Streams
-
-In actual compilers, AST construction from token streams often follows staged patterns like these:
-
-```go
-// AST Node definitions
-type ASTNode interface {
-    Type() string
-    Position() *pc.Pos
-    String() string
+    // Complete the recursion
+    defineExpr(addExpr)
+    return addExpr
 }
 
-type BinaryOpNode struct {
-    pos   *pc.Pos
-    left  ASTNode
-    op    string
-    right ASTNode
-}
-
-func (n *BinaryOpNode) Type() string { return "BinaryOp" }
-func (n *BinaryOpNode) Position() *pc.Pos { return n.pos }
-func (n *BinaryOpNode) String() string { 
-    return fmt.Sprintf("(%s %s %s)", n.left.String(), n.op, n.right.String()) 
-}
-
-type LiteralNode struct {
-    pos   *pc.Pos
-    value interface{}
-}
-
-func (n *LiteralNode) Type() string { return "Literal" }
-func (n *LiteralNode) Position() *pc.Pos { return n.pos }
-func (n *LiteralNode) String() string { return fmt.Sprintf("%v", n.value) }
-
-// Staged AST construction parsers
 func NumberLiteral() pc.Parser[ASTNode] {
     return pc.Trans(
         pc.Label("number literal", Digit()),

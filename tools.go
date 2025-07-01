@@ -541,6 +541,17 @@ func TryFastOr[T any](parsers ...Parser[T]) Parser[T] {
 	return OrWithMode(OrModeTryFast, parsers...)
 }
 
+// Lazy creates a lazy parser that evaluates the parser function when called
+// This prevents infinite loops during parser construction by deferring parser resolution
+// until parsing time, allowing for true recursive definitions
+func Lazy[T any](parserFactory func() Parser[T]) Parser[T] {
+	return Trace("lazy", func(pc *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		// Get the actual parser when parsing is performed
+		parser := parserFactory()
+		return parser(pc, src)
+	})
+}
+
 // checkTransformSafety verifies that a transformation is safe by checking if
 // applying the same parser to the transformed tokens would produce the same result.
 // This helps detect infinite loops in transformations.
@@ -582,4 +593,33 @@ func checkTransformSafety[T any](pc *ParseContext[T], parser Parser[T], original
 	}
 
 	return nil
+}
+
+// DetectLeftRecursion analyzes traces to identify potential left recursion patterns
+func DetectLeftRecursion[T any](traces []*TraceInfo) []string {
+	var warnings []string
+
+	// Track parser calls at the same position
+	positionCalls := make(map[string][]string)
+
+	for _, trace := range traces {
+		if trace.TraceType == Enter {
+			posKey := fmt.Sprintf("%s", trace.Pos.String())
+			positionCalls[posKey] = append(positionCalls[posKey], trace.Name)
+
+			// If same parser called multiple times at same position
+			calls := positionCalls[posKey]
+			if len(calls) > 3 {
+				lastThree := calls[len(calls)-3:]
+				if lastThree[0] == lastThree[1] && lastThree[1] == lastThree[2] {
+					warnings = append(warnings, fmt.Sprintf(
+						"Potential left recursion detected: '%s' called repeatedly at %s",
+						lastThree[0], posKey,
+					))
+				}
+			}
+		}
+	}
+
+	return warnings
 }

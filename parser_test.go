@@ -1596,8 +1596,8 @@ func TestTransformationSafetyCheck(t *testing.T) {
 	t.Run("SafeModeDisabled", func(t *testing.T) {
 		// Test that safety checks are disabled when not in Safe mode
 		pc := NewParseContext[int]()
-		pc.OrMode = OrModeFast  // Not Safe mode
-		pc.CheckTransformSafety = true  // This should be ignored
+		pc.OrMode = OrModeFast         // Not Safe mode
+		pc.CheckTransformSafety = true // This should be ignored
 
 		anyTokenParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
 			if len(src) == 0 {
@@ -1627,7 +1627,7 @@ func TestTransformationSafetyCheck(t *testing.T) {
 		// Test that safety checks are disabled when CheckTransformSafety is false
 		pc := NewParseContext[int]()
 		pc.OrMode = OrModeSafe
-		pc.CheckTransformSafety = false  // Disabled
+		pc.CheckTransformSafety = false // Disabled
 
 		anyTokenParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
 			if len(src) == 0 {
@@ -1695,8 +1695,8 @@ func TestActualInfiniteLoop(t *testing.T) {
 
 		// Create a recursive parser that can loop infinitely due to unsafe transformation
 		expressionBody, expression := NewAlias[int]("loop-expression")
-		
-		// This creates a dangerous pattern: the transformation produces tokens 
+
+		// This creates a dangerous pattern: the transformation produces tokens
 		// that can be consumed by the same expression parser again
 		loopingParser := expressionBody(
 			Or(
@@ -1709,7 +1709,7 @@ func TestActualInfiniteLoop(t *testing.T) {
 					}
 					return 0, nil, NewErrNotMatch("digit", "other", getTokenPos(src))
 				}),
-				
+
 				// Dangerous recursive case: processes expression and outputs compatible tokens
 				Trans(
 					Trace("expression-transform", func(pctx *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
@@ -1721,7 +1721,7 @@ func TestActualInfiniteLoop(t *testing.T) {
 						// DANGEROUS: Outputs "raw" tokens that can be re-parsed by expression!
 						if len(tokens) > 0 {
 							return []Token[int]{{
-								Type: "raw",           // ❌ Same type as input!
+								Type: "raw", // ❌ Same type as input!
 								Pos:  tokens[0].Pos,
 								Raw:  fmt.Sprintf("%d", tokens[0].Val),
 								Val:  tokens[0].Val,
@@ -1735,7 +1735,7 @@ func TestActualInfiniteLoop(t *testing.T) {
 
 		// This should trigger stack overflow due to infinite recursion
 		_, err := EvaluateWithRawTokens(pc, []string{"123"}, loopingParser)
-		
+
 		// We expect a stack overflow error
 		assert.Error(t, err)
 		if errors.Is(err, ErrStackOverflow) {
@@ -1743,7 +1743,7 @@ func TestActualInfiniteLoop(t *testing.T) {
 		} else {
 			t.Logf("Got different error (still indicates safety): %v", err)
 		}
-		
+
 		if testing.Verbose() {
 			t.Log("Trace showing the infinite loop pattern:")
 			t.Log(pc.DumpTraceAsText())
@@ -1825,5 +1825,148 @@ func TestTransformationSafetyWarning(t *testing.T) {
 		assert.Equal(t, "prefix", result[0].Type)
 		assert.Equal(t, "value", result[1].Type)
 		assert.Equal(t, 10, result[1].Val)
+	})
+}
+
+// TestLazyParser tests the Lazy combinator for recursive parser definitions
+func TestLazyParser(t *testing.T) {
+	t.Run("Basic lazy evaluation", func(t *testing.T) {
+		pc := NewParseContext[int]()
+
+		// Create a simple lazy parser
+		lazyDigit := Lazy(func() Parser[int] {
+			return Digit()
+		})
+
+		consumed, result, err := lazyDigit(pc, []Token[int]{
+			{Type: "raw", Raw: "42", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 42, result[0].Val)
+	})
+
+	t.Run("Recursive expression with Lazy", func(t *testing.T) {
+		pc := NewParseContext[int]()
+		pc.TraceEnable = true
+
+		// Define a recursive expression parser using Lazy
+		var expression Parser[int]
+
+		// Primary parser handles numbers and parenthesized expressions
+		primary := Or(
+			Digit(),
+			Trans(
+				Seq(
+					Trace("lparen", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+						if len(src) > 0 && src[0].Type == "raw" && src[0].Raw == "(" {
+							return 1, []Token[int]{{Type: "lparen", Pos: src[0].Pos, Raw: "("}}, nil
+						}
+						return 0, nil, NewErrNotMatch("(", "other", nil)
+					}),
+					Lazy(func() Parser[int] { return expression }),
+					Trace("rparen", func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+						if len(src) > 0 && src[0].Type == "raw" && src[0].Raw == ")" {
+							return 1, []Token[int]{{Type: "rparen", Pos: src[0].Pos, Raw: ")"}}, nil
+						}
+						return 0, nil, NewErrNotMatch(")", "other", nil)
+					}),
+				),
+				func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+					// Return the middle token (the expression inside parentheses)
+					return []Token[int]{tokens[1]}, nil
+				},
+			),
+		)
+
+		// Binary expression with right recursion
+		expression = Or(
+			Trans(
+				Seq(
+					primary,
+					Operator(),
+					Lazy(func() Parser[int] { return expression }),
+				),
+				func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+					left := tokens[0].Val
+					op := tokens[1].Raw
+					right := tokens[2].Val
+					var result int
+					switch op {
+					case "+":
+						result = left + right
+					case "-":
+						result = left - right
+					case "*":
+						result = left * right
+					case "/":
+						result = left / right
+					}
+					return []Token[int]{{Type: "expr", Pos: tokens[0].Pos, Val: result}}, nil
+				},
+			),
+			primary,
+		)
+
+		// Test simple addition
+		result, err := EvaluateWithRawTokens(pc, []string{"1", "+", "2"}, expression)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 3, result[0])
+
+		// Test nested parentheses
+		result, err = EvaluateWithRawTokens(pc, []string{"(", "1", "+", "2", ")", "*", "3"}, expression)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 9, result[0])
+	})
+
+	t.Run("Lazy prevents infinite construction loop", func(t *testing.T) {
+		pc := NewParseContext[int]()
+
+		// This demonstrates that Lazy allows safe recursive definitions
+		// without causing construction-time infinite loops
+		var recursiveParser Parser[int]
+
+		// Use right recursion instead of left recursion
+		recursiveParser = Or(
+			Digit(),
+			Lazy(func() Parser[int] {
+				return Trans(
+					Seq(Digit(), Operator(), recursiveParser),
+					func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+						left := tokens[0].Val
+						op := tokens[1].Raw
+						right := tokens[2].Val
+						var result int
+						switch op {
+						case "+":
+							result = left + right
+						case "-":
+							result = left - right
+						case "*":
+							result = left * right
+						case "/":
+							result = left / right
+						}
+						return []Token[int]{{Type: "expr", Pos: tokens[0].Pos, Val: result}}, nil
+					},
+				)
+			}),
+		)
+
+		// Should not hang during construction and should parse correctly
+		result, err := EvaluateWithRawTokens(pc, []string{"5"}, recursiveParser)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 5, result[0])
+
+		// Test with multiple operations (right associative)
+		result, err = EvaluateWithRawTokens(pc, []string{"1", "+", "2", "*", "3"}, recursiveParser)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, 7, result[0]) // 1 + (2 * 3) = 7 (right associative)
 	})
 }

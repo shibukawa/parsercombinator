@@ -186,6 +186,174 @@ exactlyThree := pc.Repeat("exactly-three", 3, 3, digit)
 maybeDigit := pc.Optional(digit)
 ```
 
+## 再帰パーサーとAliasとLazy
+
+パーサコンビネータでは、再帰的な文法を扱うために2つのアプローチが提供されています：
+
+### pc.Lazy - 単純な自己再帰
+
+単純な自己参照パーサーには `pc.Lazy` を使用します：
+
+```go
+var expression pc.Parser[Entity]
+
+expression = pc.Or(
+    literal(),
+    pc.Trans(
+        pc.Seq(
+            leftParen(),
+            pc.Lazy(func() pc.Parser[Entity] { return expression }),
+            rightParen(),
+        ),
+        func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+            return []pc.Token[Entity]{tokens[1]}, nil
+        },
+    ),
+)
+```
+
+### pc.NewAlias - 複雑な相互再帰
+
+相互再帰や複雑な文法には `NewAlias` を使用します：
+
+```go
+// 再帰的な文法を安全に定義
+defineExpr, exprAlias := pc.NewAlias[int]("expression")
+
+// 基本式（数値、括弧で囲まれた式）
+primaryExpr := pc.Or(
+    digit,
+    pc.Trans(
+        pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")), // 安全な再帰参照
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            return []pc.Token[int]{tokens[1]}, nil // 内部の式を返す
+        },
+    ),
+)
+
+// エイリアスを定義（これで再帰が完成）
+expression := defineExpr(primaryExpr)
+```
+
+### ⚠️ 重要：左再帰の回避
+
+**左再帰は無限ループを引き起こす**ため、パーサコンビネータでは必ず回避する必要があります。安全なパーシングのためには、この理解と防止が重要です。
+
+#### 左再帰とは何か？
+
+左再帰は、パーサールールが最初のステップとして直接または間接的に自分自身を呼び出すときに発生します：
+
+```go
+// ❌ 危険：直接的な左再帰
+expressionBody, expression := pc.NewAlias[int]("expression")
+expression = expressionBody(
+    pc.Or(
+        pc.Seq(expression, operator, expression), // ← 'expression'が最初に自分自身を呼び出す！
+        number,
+    ),
+)
+
+// ❌ 危険：間接的な左再帰
+// A → B C, B → A d   （AがBを通じて間接的に自分自身を呼び出す）
+defineA, aliasA := pc.NewAlias[int]("A")
+defineB, aliasB := pc.NewAlias[int]("B")
+
+parserA := defineA(pc.Seq(aliasB, pc.Literal("C")))
+parserB := defineB(pc.Seq(aliasA, pc.Literal("d")))  // ← 間接的な再帰！
+```
+
+#### 左再帰が危険な理由
+
+1. **無限構築ループ**: パーサーはGoの関数/クロージャです。構築時に左再帰は無限呼び出しチェーンを作成します
+2. **スタックオーバーフロー**: パーシングが始まる前にGoランタイムスタックがオーバーフローします
+3. **ランタイム保護なし**: これはパーサー構築時に発生し、パース実行時ではありません
+4. **サイレント失敗**: 多くの場合、謎めいたスタックオーバーフローエラーとして現れます
+
+#### 安全な式パーシングパターン
+
+代わりに**優先順位クライミング**と**右再帰**を使用します：
+
+```go
+// ✅ 安全：反復パターンを使った優先順位クライミング
+func CreateSafeExpressionParser() pc.Parser[int] {
+    defineExpr, exprAlias := pc.NewAlias[int]("expr")
+    
+    // 基本式（最高優先順位）
+    primaryExpr := pc.Or(
+        Number(),
+        pc.Trans( // 括弧で囲まれた式
+            pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")),
+            func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+                return []pc.Token[int]{tokens[1]}, nil
+            },
+        ),
+    )
+    
+    // 乗算/除算（高優先順位）
+    mulExpr := pc.Trans(
+        pc.Seq(
+            primaryExpr,
+            pc.ZeroOrMore("mul_ops", pc.Seq(
+                pc.Or(pc.Literal("*"), pc.Literal("/")),
+                primaryExpr,
+            )),
+        ),
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            result := tokens[0].Val
+            for i := 1; i < len(tokens); i += 2 {
+                op := tokens[i].Raw
+                right := tokens[i+1].Val
+                switch op {
+                case "*": result *= right
+                case "/": result /= right
+                }
+            }
+            return []pc.Token[int]{{Type: "expr", Val: result, Pos: tokens[0].Pos}}, nil
+        },
+    )
+    
+    // 加算/減算（低優先順位）
+    addExpr := pc.Trans(
+        pc.Seq(
+            mulExpr,
+            pc.ZeroOrMore("add_ops", pc.Seq(
+                pc.Or(pc.Literal("+"), pc.Literal("-")),
+                mulExpr,
+            )),
+        ),
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            result := tokens[0].Val
+            for i := 1; i < len(tokens); i += 2 {
+                op := tokens[i].Raw
+                right := tokens[i+1].Val
+                switch op {
+                case "+": result += right
+                case "-": result -= right
+                }
+            }
+            return []pc.Token[int]{{Type: "result", Val: result, Pos: tokens[0].Pos}}, nil
+        },
+    )
+    
+    // 再帰を完成
+    defineExpr(addExpr)
+    return addExpr
+}
+```
+
+#### いつLazyを使い、いつNewAliasを使うか
+
+**pc.Lazy を使う場合:**
+- 単純な自己再帰文法
+- 1つの規則内での再帰
+- デバッグがシンプルでよい場合
+
+**pc.NewAlias を使う場合:**
+- 相互再帰（複数の規則が互いを参照）
+- 複雑で大きな文法
+- より良いトレース/デバッグサポートが必要
+- チーム開発での保守性を重視
+
 ## 高度な機能
 
 ### 先読み操作
@@ -297,57 +465,151 @@ expression = expressionBody(
 
 左再帰を右再帰に変換することで問題を解決できます：
 
+### エイリアスを使った再帰パーサー
+
+相互再帰や自己参照文法には、`NewAlias`を使用してパーサー構築時の無限ループを回避します：
+
 ```go
-// ✅ 安全: 右再帰による実装
-expressionBody, expression := pc.NewAlias[Entity]("expression")
-expression = expressionBody(
-    pc.Or(
-        // 基本要素を最初に配置
-        literal(),
-        pc.Seq(leftParen(), expression, rightParen()),
-        // 二項演算は右再帰で定義
-        pc.Seq(literal(), operator(), expression),
+// 再帰文法を安全に定義
+defineExpr, exprAlias := pc.NewAlias[int]("expression")
+
+// 基本式（数値、括弧付き式）
+primaryExpr := pc.Or(
+    digit,
+    pc.Trans(
+        pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")), // 安全な再帰参照
+        func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+            return []pc.Token[int]{tokens[1]}, nil // 内側の式を返す
+        },
     ),
 )
+
+// エイリアスを定義（これで再帰が完成）
+expression := defineExpr(primaryExpr)
 ```
 
-#### 解決策2: 優先順位を考慮した階層設計
+### ⚠️ 重要: 左再帰の回避
 
-より実用的なアプローチとして、演算子の優先順位を考慮した階層構造を使用します：
+**左再帰は無限ループを引き起こし**、パーサーコンビネータでは必ず回避する必要があります。これを理解し防ぐことは安全なパースングにとって重要です。
+
+#### 左再帰とは何か？
+
+左再帰は、パーサールールが直接的または間接的に、パースンの最初のステップとして自分自身を呼び出すときに発生します：
 
 ```go
-var (
-    expression     pc.Parser[Entity]
-    additive       pc.Parser[Entity] // + -
-    multiplicative pc.Parser[Entity] // * /
-    primary        pc.Parser[Entity] // 基本要素
+// ❌ 危険: 直接左再帰
+expressionBody, expression := pc.NewAlias[int]("expression")
+expression = expressionBody(
+    pc.Or(
+        pc.Seq(expression, operator, expression), // ← 'expression'が最初に自分自身を呼び出す！
+        number,
+    ),
 )
 
-func init() {
-    // 最下位: 基本要素（数値、変数、括弧付き式）
-    primary = pc.Or(
-        literal(),
-        identifier(),
-        pc.Trans(
-            pc.Seq(leftParen(), pc.Lazy(func() pc.Parser[Entity] { return expression }), rightParen()),
-            func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
-                // 括弧内の式をそのまま返す
-                return []pc.Token[Entity]{tokens[1]}, nil
+// ❌ 危険: 間接左再帰
+// A → B C, B → A d   （AがBを通じて間接的に自分自身を呼び出す）
+defineA, aliasA := pc.NewAlias[int]("A")
+defineB, aliasB := pc.NewAlias[int]("B")
+
+parserA := defineA(pc.Seq(aliasB, pc.Literal("C")))
+parserB := defineB(pc.Seq(aliasA, pc.Literal("d")))  // ← 間接再帰！
+```
+
+#### 左再帰が危険な理由
+
+1. **無限構築ループ**: パーサーはGoの関数/クロージャです。構築時に左再帰は無限呼び出しチェーンを作成します
+2. **スタックオーバーフロー**: パースンが始まる前にGoランタイムスタックがオーバーフローします
+3. **ランタイム保護なし**: これはパーサー構築時に発生し、パース時ではありません
+4. **無音の失敗**: しばしば謎めいたスタックオーバーフローエラーとして現れます
+
+#### 安全な式パースンパターン
+
+代わりに**優先順位クライミング**と**右再帰**を使用します：
+
+```go
+// ✅ 安全: 反復パターンによる優先順位クライミング
+func CreateSafeExpressionParser() pc.Parser[int] {
+    defineExpr, exprAlias := pc.NewAlias[int]("expr")
+    
+    // 基本式（最高優先度）
+    primaryExpr := pc.Or(
+        Number(),
+        pc.Trans( // 括弧付き式
+            pc.Seq(pc.Literal("("), exprAlias, pc.Literal(")")),
+            func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+                return []pc.Token[int]{tokens[1]}, nil
             },
         ),
     )
-
-    // 中位: 乗算・除算（高優先度）
-    multiplicative = pc.Trans(
+    
+    // 乗算・除算（高優先度）
+    mulExpr := pc.Trans(
         pc.Seq(
-            primary,
-            pc.ZeroOrMore("mul_ops", pc.Seq(multiplyOperator(), primary)),
+            primaryExpr,
+            pc.ZeroOrMore("mul_ops", pc.Seq(
+                pc.Or(pc.Literal("*"), pc.Literal("/")),
+                primaryExpr,
+            )),
         ),
-        buildLeftAssociativeExpression,
+        transformBinaryOps, // 左結合変換
     )
+    
+    // 加算・減算（低優先度）
+    addExpr := pc.Trans(
+        pc.Seq(
+            mulExpr,
+            pc.ZeroOrMore("add_ops", pc.Seq(
+                pc.Or(pc.Literal("+"), pc.Literal("-")),
+                mulExpr,
+            )),
+        ),
+        transformBinaryOps, // 左結合変換
+    )
+    
+    // 再帰を完成
+    defineExpr(addExpr)
+    return addExpr
+}
 
-    // 上位: 加算・減算（低優先度）
-    additive = pc.Trans(
+// 二項演算を左結合に変換
+func transformBinaryOps(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+    result := tokens[0].Val
+    for i := 1; i < len(tokens); i += 2 {
+        op := tokens[i].Raw
+        right := tokens[i+1].Val
+        switch op {
+        case "+": result += right
+        case "-": result -= right
+        case "*": result *= right
+        case "/": result /= right
+        }
+    }
+    return []pc.Token[int]{{Type: "expr", Val: result, Pos: tokens[0].Pos}}, nil
+}
+```
+
+#### 重要な安全原則
+
+1. **ZeroOrMore/OneOrMoreを使用**: 直接再帰を繰り返し構造で置き換える
+2. **優先順位クライミング**: 再帰ではなくパーサー階層で演算子優先順位を処理
+3. **右再帰のみ**: 再帰が必要な場合は左再帰でないことを確認
+4. **相互再帰にはNewAlias**: エイリアスを使用して循環依存を安全に切断
+5. **早期テスト**: "42"のような簡単な式がスタックオーバーフローなしでパースできるかテスト
+
+#### 完全な安全式パースンの例
+
+動作する安全な式パーサーが`examples/safe_expression/main.go`にあります：
+
+```bash
+cd examples/safe_expression
+go run main.go
+```
+
+これは以下を実証します：
+- 入れ子の括弧の安全な処理: `((1+2)*3)+4`
+- 正しい演算子優先順位: `1+2*3` → 7（9ではなく）
+- 深い入れ子でもスタックオーバーフローなし
+- ゼロ除算の適切なエラー処理
         pc.Seq(
             multiplicative,
             pc.ZeroOrMore("add_ops", pc.Seq(addOperator(), multiplicative)),

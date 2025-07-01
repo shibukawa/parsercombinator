@@ -86,17 +86,17 @@ type TraceInfo struct {
 }
 
 type ParseContext[T any] struct {
-	Tokens         []Token[T]
-	Pos            int
-	RemainedTokens []Token[T]
-	Results        []Token[T]
-	Traces         []*TraceInfo
-	Errors         []*ParseError
-	Depth          int
-	TraceEnable    bool
-	MaxDepth       int    // Maximum allowed recursion depth (0 means no limit)
-	OrMode         OrMode // Or parser behavior mode (default: OrModeSafe)
-	CheckTransformSafety bool // Enable transformation safety checks (default: false)
+	Tokens               []Token[T]
+	Pos                  int
+	RemainedTokens       []Token[T]
+	Results              []Token[T]
+	Traces               []*TraceInfo
+	Errors               []*ParseError
+	Depth                int
+	TraceEnable          bool
+	MaxDepth             int    // Maximum allowed recursion depth (0 means no limit)
+	OrMode               OrMode // Or parser behavior mode (default: OrModeSafe)
+	CheckTransformSafety bool   // Enable transformation safety checks (default: false)
 }
 
 func (pc *ParseContext[T]) AppendError(err error, pos *Pos) error {
