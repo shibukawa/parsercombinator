@@ -96,6 +96,7 @@ type ParseContext[T any] struct {
 	TraceEnable    bool
 	MaxDepth       int    // Maximum allowed recursion depth (0 means no limit)
 	OrMode         OrMode // Or parser behavior mode (default: OrModeSafe)
+	CheckTransformSafety bool // Enable transformation safety checks (default: false)
 }
 
 func (pc *ParseContext[T]) AppendError(err error, pos *Pos) error {

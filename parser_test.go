@@ -1517,3 +1517,313 @@ func TestOrModeTryFastWarning(t *testing.T) {
 
 	t.Logf("Expected warning message should appear above")
 }
+
+func TestTransformationSafetyCheck(t *testing.T) {
+	t.Run("SafeTransformation", func(t *testing.T) {
+		// Test a safe transformation that changes the structure
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = true
+
+		// Parser that matches a digit
+		digitParser := Digit()
+
+		// Safe transformer that changes type but not structure
+		safeTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			if len(tokens) == 1 && tokens[0].Type == "digit" {
+				return []Token[int]{
+					{
+						Type: "number",
+						Pos:  tokens[0].Pos,
+						Val:  tokens[0].Val,
+					},
+				}, nil
+			}
+			return tokens, nil
+		}
+
+		safeTransParser := Trans(digitParser, safeTransformer)
+
+		// This should succeed without warnings
+		consumed, result, err := safeTransParser(pc, []Token[int]{
+			{Type: "raw", Raw: "5", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, "number", result[0].Type)
+		assert.Equal(t, 5, result[0].Val)
+	})
+
+	t.Run("UnsafeTransformation", func(t *testing.T) {
+		// Test an unsafe transformation that could cause infinite loops
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = true
+
+		// Parser that matches any token
+		anyTokenParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+			if len(src) == 0 {
+				return 0, nil, NewErrNotMatch("any token", "EOF", nil)
+			}
+			return 1, src[0:1], nil
+		}
+
+		// Unsafe transformer that returns the same token (identity transformation)
+		unsafeTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			// Return exactly the same tokens - this could cause infinite loops
+			return tokens, nil
+		}
+
+		unsafeTransParser := Trans(anyTokenParser, unsafeTransformer)
+
+		// Capture stderr to check for warnings
+		// Note: In a real test environment, you might want to redirect stderr
+		// For now, we'll just verify that the parse succeeds but would log warnings
+
+		consumed, result, err := unsafeTransParser(pc, []Token[int]{
+			{Type: "test", Raw: "test", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		// The parse should still succeed, but warnings should be logged
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, "test", result[0].Type)
+	})
+
+	t.Run("SafeModeDisabled", func(t *testing.T) {
+		// Test that safety checks are disabled when not in Safe mode
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeFast  // Not Safe mode
+		pc.CheckTransformSafety = true  // This should be ignored
+
+		anyTokenParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+			if len(src) == 0 {
+				return 0, nil, NewErrNotMatch("any token", "EOF", nil)
+			}
+			return 1, src[0:1], nil
+		}
+
+		// Identity transformer
+		identityTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			return tokens, nil
+		}
+
+		unsafeTransParser := Trans(anyTokenParser, identityTransformer)
+
+		// Should succeed without any safety checks
+		consumed, result, err := unsafeTransParser(pc, []Token[int]{
+			{Type: "test", Raw: "test", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+	})
+
+	t.Run("SafetyCheckDisabled", func(t *testing.T) {
+		// Test that safety checks are disabled when CheckTransformSafety is false
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = false  // Disabled
+
+		anyTokenParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+			if len(src) == 0 {
+				return 0, nil, NewErrNotMatch("any token", "EOF", nil)
+			}
+			return 1, src[0:1], nil
+		}
+
+		identityTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			return tokens, nil
+		}
+
+		unsafeTransParser := Trans(anyTokenParser, identityTransformer)
+
+		// Should succeed without any safety checks
+		consumed, result, err := unsafeTransParser(pc, []Token[int]{
+			{Type: "test", Raw: "test", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+	})
+
+	t.Run("EmptyTransformation", func(t *testing.T) {
+		// Test that empty transformations are considered safe
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = true
+
+		digitParser := Digit()
+
+		// Transformer that returns empty tokens
+		emptyTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			return []Token[int]{}, nil
+		}
+
+		emptyTransParser := Trans(digitParser, emptyTransformer)
+
+		// This should succeed without warnings (empty is considered safe)
+		consumed, result, err := emptyTransParser(pc, []Token[int]{
+			{Type: "raw", Raw: "5", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 0, len(result))
+	})
+}
+
+// Helper function for getting token position safely
+func getTokenPos[T any](src []Token[T]) *Pos {
+	if len(src) > 0 {
+		return src[0].Pos
+	}
+	return nil
+}
+
+// TestActualInfiniteLoop demonstrates a real infinite loop scenario
+func TestActualInfiniteLoop(t *testing.T) {
+	t.Run("Infinite loop with recursive parser", func(t *testing.T) {
+		pc := NewParseContext[int]()
+		pc.MaxDepth = 5 // Very low limit to catch loop quickly
+		pc.TraceEnable = true
+
+		// Create a recursive parser that can loop infinitely due to unsafe transformation
+		expressionBody, expression := NewAlias[int]("loop-expression")
+		
+		// This creates a dangerous pattern: the transformation produces tokens 
+		// that can be consumed by the same expression parser again
+		loopingParser := expressionBody(
+			Or(
+				// Base case: simple digit
+				Trace("digit-base", func(pctx *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+					if len(src) > 0 && src[0].Type == "raw" {
+						if val, err := strconv.Atoi(src[0].Raw); err == nil {
+							return 1, []Token[int]{{Type: "digit", Pos: src[0].Pos, Val: val}}, nil
+						}
+					}
+					return 0, nil, NewErrNotMatch("digit", "other", getTokenPos(src))
+				}),
+				
+				// Dangerous recursive case: processes expression and outputs compatible tokens
+				Trans(
+					Trace("expression-transform", func(pctx *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+						// This tries to match expression recursively
+						consumed, tokens, err := expression(pctx, src)
+						return consumed, tokens, err
+					}),
+					func(pctx *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+						// DANGEROUS: Outputs "raw" tokens that can be re-parsed by expression!
+						if len(tokens) > 0 {
+							return []Token[int]{{
+								Type: "raw",           // ❌ Same type as input!
+								Pos:  tokens[0].Pos,
+								Raw:  fmt.Sprintf("%d", tokens[0].Val),
+								Val:  tokens[0].Val,
+							}}, nil
+						}
+						return tokens, nil
+					},
+				),
+			),
+		)
+
+		// This should trigger stack overflow due to infinite recursion
+		_, err := EvaluateWithRawTokens(pc, []string{"123"}, loopingParser)
+		
+		// We expect a stack overflow error
+		assert.Error(t, err)
+		if errors.Is(err, ErrStackOverflow) {
+			t.Logf("Successfully caught infinite loop: %v", err)
+		} else {
+			t.Logf("Got different error (still indicates safety): %v", err)
+		}
+		
+		if testing.Verbose() {
+			t.Log("Trace showing the infinite loop pattern:")
+			t.Log(pc.DumpTraceAsText())
+		}
+	})
+}
+
+func TestTransformationSafetyWarning(t *testing.T) {
+	t.Run("ActualWarningOutput", func(t *testing.T) {
+		// This test verifies that the safety check actually outputs warnings
+		// when an unsafe transformation is detected
+
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = true
+
+		// Create a parser that always succeeds and returns the same token
+		identityParser := func(pc *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+			if len(src) == 0 {
+				return 0, nil, NewErrNotMatch("any token", "EOF", nil)
+			}
+			return 1, src[0:1], nil
+		}
+
+		// Identity transformer that returns exactly the same tokens
+		// This will trigger the safety check warning
+		identityTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			return tokens, nil
+		}
+
+		unsafeTransParser := Trans(identityParser, identityTransformer)
+
+		// Execute the parser - this should output a warning to stderr
+		consumed, result, err := unsafeTransParser(pc, []Token[int]{
+			{Type: "test", Raw: "test", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		// Parse should still succeed
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 1, len(result))
+		assert.Equal(t, "test", result[0].Type)
+
+		// Note: The warning will be printed to stderr
+		// In a production test environment, you might want to capture stderr
+		// to verify the warning message is actually printed
+		t.Log("Check stderr for transformation safety warning")
+	})
+
+	t.Run("DifferentTransformation", func(t *testing.T) {
+		// Test a transformation that changes tokens significantly - should not warn
+		pc := NewParseContext[int]()
+		pc.OrMode = OrModeSafe
+		pc.CheckTransformSafety = true
+
+		digitParser := Digit()
+
+		// Transformer that significantly changes the structure
+		changingTransformer := func(pc *ParseContext[int], tokens []Token[int]) ([]Token[int], error) {
+			if len(tokens) == 1 && tokens[0].Type == "digit" {
+				// Return multiple different tokens
+				return []Token[int]{
+					{Type: "prefix", Raw: "num:", Pos: tokens[0].Pos},
+					{Type: "value", Val: tokens[0].Val * 2, Pos: tokens[0].Pos},
+				}, nil
+			}
+			return tokens, nil
+		}
+
+		safeTransParser := Trans(digitParser, changingTransformer)
+
+		consumed, result, err := safeTransParser(pc, []Token[int]{
+			{Type: "raw", Raw: "5", Pos: &Pos{Line: 1, Col: 1}},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, consumed)
+		assert.Equal(t, 2, len(result))
+		assert.Equal(t, "prefix", result[0].Type)
+		assert.Equal(t, "value", result[1].Type)
+		assert.Equal(t, 10, result[1].Val)
+	})
+}

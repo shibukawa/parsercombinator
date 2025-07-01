@@ -259,6 +259,117 @@ addParser := pc.Trans(
 )
 ```
 
+#### ⚠️ Important: Avoiding Infinite Loops in Transformations
+
+When using `Trans()` to transform tokens, **be extremely careful** about token compatibility to avoid infinite loops:
+
+```go
+// ❌ DANGEROUS: This can cause infinite loops
+badParser := pc.Trans(
+    pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
+        if src[0].Type == "raw" {
+            i, err := strconv.Atoi(src[0].Raw)
+            if err != nil {
+                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
+            }
+            // ❌ PROBLEM: Still produces "raw" type that can be re-parsed
+            return 1, []pc.Token[int]{{Type: "raw", Pos: src[0].Pos, Raw: src[0].Raw, Val: i}}, nil
+        }
+        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
+    }),
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // The transformed token is still "raw" type - can be parsed again!
+        return tokens, nil // ❌ This creates an infinite loop risk
+    },
+)
+
+// ✅ SAFE: Change token type to prevent re-parsing
+goodParser := pc.Trans(
+    pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
+        if src[0].Type == "raw" {
+            i, err := strconv.Atoi(src[0].Raw)
+            if err != nil {
+                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
+            }
+            return 1, []pc.Token[int]{{Type: "digit", Pos: src[0].Pos, Val: i}}, nil
+        }
+        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
+    }),
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // ✅ SAFE: Token type is "digit", not "raw" - won't be re-parsed
+        return []pc.Token[int]{{
+            Type: "number",  // Different type prevents re-parsing
+            Pos:  tokens[0].Pos,
+            Val:  tokens[0].Val,
+        }}, nil
+    },
+)
+```
+
+**Key Safety Rules:**
+
+1. **Always change token types**: Never output tokens that could be consumed by the same parser again
+2. **Check for state changes**: Ensure transformations make meaningful progress (different `Type` or `Val`)
+3. **Use stack overflow protection**: Set appropriate `MaxDepth` limits as a safety net
+4. **Test with tracing**: Enable tracing to detect unexpected re-parsing patterns
+
+**Detection Strategy:**
+```go
+// Enable tracing to detect infinite loops during development
+context := pc.NewParseContext[int]()
+context.TraceEnable = true
+context.MaxDepth = 50 // Lower limit for debugging
+
+result, err := pc.EvaluateWithRawTokens(context, input, parser)
+if errors.Is(err, pc.ErrStackOverflow) {
+    fmt.Println("Potential infinite loop detected!")
+    context.DumpTrace() // Examine the trace for repeated patterns
+}
+```
+
+### Automatic Transformation Safety Checks
+
+The library includes optional automatic safety checks that can detect potentially dangerous transformations at runtime:
+
+```go
+// Enable automatic transformation safety checks
+context := pc.NewParseContext[int]()
+context.OrMode = pc.OrModeSafe          // Must be in Safe mode
+context.CheckTransformSafety = true     // Enable safety checks
+
+// Parser with potentially unsafe transformation
+parser := pc.Trans(
+    someParser,
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // If this transformation returns tokens that the same parser 
+        // would consume again with the same result, a warning will be logged
+        return tokens, nil // Identity transformation - potentially unsafe!
+    },
+)
+```
+
+**How It Works:**
+1. After each transformation in Safe mode (when `CheckTransformSafety` is enabled)
+2. The system attempts to re-parse the transformed tokens with the same parser
+3. If the re-parsing produces identical results, a warning is logged to stderr
+4. The parsing continues normally, but the warning helps identify potential infinite loops
+
+**Safety Check Output Example:**
+```
+Warning: Transformation safety check failed: potential infinite loop in transformation at myfile.go:123 - parser produces same result when applied to transformed tokens
+```
+
+**Configuration:**
+- Only active when `OrMode` is `OrModeSafe` 
+- Must explicitly enable with `CheckTransformSafety = true`
+- Warnings are logged to stderr but don't stop parsing
+- Uses runtime caller information to show exact file and line location
+
+**Limitations:**
+- Cannot detect all unsafe patterns (e.g., side effects in transformations)
+- May produce false positives for complex transformations with external state
+- Performance overhead when enabled (use primarily during development)
+- Only checks immediate re-parsing, not multi-step transformation chains
 ### Recursive Parsers with Alias
 
 ```go
@@ -451,6 +562,11 @@ func main() {
 4. **Compose Incrementally**: Build complex parsers from simple, well-tested components
 5. **Use Recovery**: Implement error recovery for robust parsing of malformed input
 6. **Type Safety**: Leverage Go's type system to catch errors at compile time
+7. **⚠️ Transformation Safety**: Always change token types in transformations to prevent infinite loops
+   - Never output tokens that could be re-parsed by the same parser
+   - Use stack overflow protection (`MaxDepth`) as a safety net
+   - Enable tracing during development to detect re-parsing patterns
+   - Use automatic safety checks in Safe mode: `context.CheckTransformSafety = true`
 
 ## Practical Compiler Construction Patterns
 

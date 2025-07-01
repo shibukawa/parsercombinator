@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"runtime"
 	"strings"
 )
@@ -315,6 +316,16 @@ func Trans[T any](parser Parser[T], tf Transformer[T]) Parser[T] {
 		if err != nil {
 			return 0, src, err
 		}
+
+		// Check transformation safety in Safe mode if enabled
+		if pc.OrMode == OrModeSafe && pc.CheckTransformSafety {
+			err := checkTransformSafety(pc, parser, newTokens, result)
+			if err != nil {
+				// Log warning but don't fail the parse
+				fmt.Fprintf(os.Stderr, "Warning: Transformation safety check failed: %v\n", err)
+			}
+		}
+
 		return consumed, result, nil
 	}
 }
@@ -528,4 +539,47 @@ func SafeOr[T any](parsers ...Parser[T]) Parser[T] {
 // TryFastOr creates an Or parser that uses first match but warns when longest match differs
 func TryFastOr[T any](parsers ...Parser[T]) Parser[T] {
 	return OrWithMode(OrModeTryFast, parsers...)
+}
+
+// checkTransformSafety verifies that a transformation is safe by checking if
+// applying the same parser to the transformed tokens would produce the same result.
+// This helps detect infinite loops in transformations.
+func checkTransformSafety[T any](pc *ParseContext[T], parser Parser[T], originalTokens, transformedTokens []Token[T]) error {
+	// Skip check if transformed tokens are empty (common safe case)
+	if len(transformedTokens) == 0 {
+		return nil
+	}
+
+	// Create a new context to avoid side effects on the original context
+	testPC := &ParseContext[T]{
+		MaxDepth:             pc.MaxDepth,
+		OrMode:               pc.OrMode,
+		CheckTransformSafety: false, // Disable recursive checks
+	}
+
+	// Try to parse the transformed tokens with the same parser
+	consumed, reparsedTokens, err := parser(testPC, transformedTokens)
+	if err != nil {
+		// If the parser fails on transformed tokens, it's likely safe
+		return nil
+	}
+
+	// Check if the parser consumed all transformed tokens
+	if consumed != len(transformedTokens) {
+		// Parser didn't consume all tokens, likely safe
+		return nil
+	}
+
+	// Check if reparsing produces the same result as the transformed tokens
+	if reflect.DeepEqual(transformedTokens, reparsedTokens) {
+		// Get caller information for better error reporting
+		_, file, line, ok := runtime.Caller(4) // Adjusted to find the actual transformation call
+		if ok {
+			return fmt.Errorf("potential infinite loop in transformation at %s:%d - parser produces same result when applied to transformed tokens", file, line)
+		} else {
+			return fmt.Errorf("potential infinite loop in transformation - parser produces same result when applied to transformed tokens")
+		}
+	}
+
+	return nil
 }

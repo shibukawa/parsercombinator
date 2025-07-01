@@ -609,6 +609,11 @@ func main() {
 4. **段階的に構成**: 単純でテスト済みのコンポーネントから複雑なパーサーを構築
 5. **復旧を使用**: 不正な入力の堅牢なパーシングのためにエラー復旧を実装
 6. **型安全性**: Goの型システムを活用してコンパイル時にエラーをキャッチ
+7. **⚠️ 変換の安全性**: 無限ループを防ぐため、変換では常にトークンタイプを変更
+   - 同じパーサーが再度パースできるトークンを出力しない
+   - 安全網としてスタックオーバーフロー保護（`MaxDepth`）を使用
+   - 開発中はトレースを有効にして再パースパターンを検出
+   - Safeモードでの自動安全性チェックを使用: `context.CheckTransformSafety = true`
 
 ## 実践的なコンパイラ構築パターン
 
@@ -986,7 +991,7 @@ func ValidateHTMLStructure() pc.Parser[bool] {
         }
         return 0, nil, pc.NewErrNotMatch("HTML終了タグ", token.Node, src[0].Pos)
     })
-    
+
     // body要素の検証
     bodyElement := pc.Seq(
         pc.Literal("body_open"),
@@ -1311,3 +1316,115 @@ pc.SetSafeMode()    // 最長一致（デフォルト）
 pc.SetFastMode()    // 最初のマッチ
 pc.SetTryFastMode() // 最初のマッチ（警告付き）
 ```
+
+#### ⚠️ 重要: 変換での無限ループの回避
+
+`Trans()` を使用してトークンを変換する際は、**トークンの互換性**に細心の注意を払い、無限ループを避けてください：
+
+```go
+// ❌ 危険: 無限ループを引き起こす可能性
+badParser := pc.Trans(
+    pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
+        if src[0].Type == "raw" {
+            i, err := strconv.Atoi(src[0].Raw)
+            if err != nil {
+                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
+            }
+            // ❌ 問題: 再パース可能な "raw" タイプを生成
+            return 1, []pc.Token[int]{{Type: "raw", Pos: src[0].Pos, Raw: src[0].Raw, Val: i}}, nil
+        }
+        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
+    }),
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // 変換されたトークンがまだ "raw" タイプ - 再度パースされる可能性！
+        return tokens, nil // ❌ 無限ループのリスクを作る
+    },
+)
+
+// ✅ 安全: 再パースを防ぐためにトークンタイプを変更
+goodParser := pc.Trans(
+    pc.Trace("digit", func(pctx *pc.ParseContext[int], src []pc.Token[int]) (int, []pc.Token[int], error) {
+        if src[0].Type == "raw" {
+            i, err := strconv.Atoi(src[0].Raw)
+            if err != nil {
+                return 0, nil, pc.NewErrNotMatch("integer", src[0].Raw, src[0].Pos)
+            }
+            return 1, []pc.Token[int]{{Type: "digit", Pos: src[0].Pos, Val: i}}, nil
+        }
+        return 0, nil, pc.NewErrNotMatch("digit", src[0].Type, src[0].Pos)
+    }),
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // ✅ 安全: トークンタイプが "digit" で "raw" ではない - 再パースされない
+        return []pc.Token[int]{{
+            Type: "number",  // 異なるタイプで再パースを防止
+            Pos:  tokens[0].Pos,
+            Val:  tokens[0].Val,
+        }}, nil
+    },
+)
+```
+
+**重要な安全ルール:**
+
+1. **常にトークンタイプを変更**: 同じパーサーが再度消費できるトークンを出力しない
+2. **状態変化を確認**: 変換が意味のある進歩（異なる `Type` または `Val`）を行うことを確保
+3. **スタックオーバーフロー保護を使用**: 安全網として適切な `MaxDepth` 制限を設定
+4. **トレースでテスト**: トレースを有効にして予期しない再パースパターンを検出
+
+**検出戦略:**
+```go
+// 開発中にトレースを有効にして無限ループを検出
+context := pc.NewParseContext[int]()
+context.TraceEnable = true
+context.MaxDepth = 50 // デバッグ用の低い制限
+
+result, err := pc.EvaluateWithRawTokens(context, input, parser)
+if errors.Is(err, pc.ErrStackOverflow) {
+    fmt.Println("無限ループの可能性が検出されました！")
+    context.DumpTrace() // 繰り返しパターンのトレースを調査
+}
+```
+
+### 自動変換安全性チェック
+
+ライブラリには、実行時に潜在的に危険な変換を検出できるオプションの自動安全性チェック機能が含まれています：
+
+```go
+// 自動変換安全性チェックを有効化
+context := pc.NewParseContext[int]()
+context.OrMode = pc.OrModeSafe          // Safeモードにする必要がある
+context.CheckTransformSafety = true     // 安全性チェックを有効化
+
+// 潜在的に安全でない変換を含むパーサー
+parser := pc.Trans(
+    someParser,
+    func(pctx *pc.ParseContext[int], tokens []pc.Token[int]) ([]pc.Token[int], error) {
+        // この変換が同じパーサーで再度同じ結果を生成するトークンを返す場合、
+        // 警告がログ出力されます
+        return tokens, nil // 恒等変換 - 潜在的に安全でない！
+    },
+)
+```
+
+**動作原理:**
+1. Safeモードで各変換後（`CheckTransformSafety`が有効な場合）
+2. システムは変換されたトークンを同じパーサーで再パースを試行
+3. 再パースが同じ結果を生成する場合、stderrに警告をログ出力
+4. パースは正常に続行されますが、警告により潜在的な無限ループを特定可能
+
+**安全性チェック出力例:**
+```
+Warning: Transformation safety check failed: potential infinite loop in transformation at myfile.go:123 - parser produces same result when applied to transformed tokens
+```
+
+**設定:**
+- `OrMode`が`OrModeSafe`の場合のみ動作
+- `CheckTransformSafety = true`で明示的に有効化する必要がある
+- 警告はstderrにログ出力されるが、パースは停止しない
+- ランタイム呼び出し元情報を使用して正確なファイルと行位置を表示
+
+**制限事項:**
+- 全ての安全でないパターンを検出できない（例：変換での副作用）
+- 外部状態を持つ複雑な変換で偽陽性の可能性
+- 有効時のパフォーマンスオーバーヘッド（主に開発時に使用）
+- 即座の再パースのみチェック、多段階変換チェーンは対象外
