@@ -95,6 +95,7 @@ type ParseContext[T any] struct {
 	Depth          int
 	TraceEnable    bool
 	MaxDepth       int // Maximum allowed recursion depth (0 means no limit)
+	OrMode         OrMode // Or parser behavior mode (default: OrModeSafe)
 }
 
 func (pc *ParseContext[T]) AppendError(err error, pos *Pos) error {
@@ -147,6 +148,7 @@ func (pc *ParseContext[T]) DumpTraceTo(w io.Writer) {
 func NewParseContext[T any]() *ParseContext[T] {
 	return &ParseContext[T]{
 		MaxDepth: 1000, // Default maximum depth limit
+		OrMode:   OrModeSafe, // Default Or parser behavior mode
 	}
 }
 
@@ -161,5 +163,30 @@ func (pc *ParseContext[T]) CheckDepthAndIncrement(pos *Pos) error {
 func (pc *ParseContext[T]) DecrementDepth() {
 	if pc.Depth > 0 {
 		pc.Depth--
+	}
+}
+
+// OrMode defines the behavior of Or parser
+type OrMode int
+
+const (
+	// OrModeSafe (default) - Uses longest match logic for consistent and safe behavior
+	OrModeSafe OrMode = iota
+	// OrModeFast - Uses first match logic for better performance
+	OrModeFast
+	// OrModeTryFast - Uses first match but warns if longest match would choose differently
+	OrModeTryFast
+)
+
+func (om OrMode) String() string {
+	switch om {
+	case OrModeSafe:
+		return "Safe"
+	case OrModeFast:
+		return "Fast"
+	case OrModeTryFast:
+		return "TryFast"
+	default:
+		return "Unknown"
 	}
 }

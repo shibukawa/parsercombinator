@@ -3,6 +3,8 @@ package parsercombinator
 import (
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 )
 
@@ -134,26 +136,173 @@ func SeqWithLabel[T any](label string, parsers ...Parser[T]) Parser[T] {
 func Or[T any](parsers ...Parser[T]) Parser[T] {
 	return Trace("or", func(pctx *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
 		var allError []error
-		for _, p := range parsers {
-			consumed, newTokens, err := p(pctx, src)
-
-			if err == nil { // match
-				return consumed, newTokens, nil
-			}
-
-			// not match
-			// try other options, because it is not critical error
-			if errors.Is(err, ErrNotMatch) || errors.Is(err, ErrRepeatCount) {
-				allError = append(allError, err)
-				continue
-			}
-			// critical error
-			return consumed, nil, err
-		}
-		return 0, nil, &ParseError{
-			Parent: errors.Join(allError...), Pos: src[0].Pos,
+		
+		switch pctx.OrMode {
+		case OrModeFast:
+			return orFast(pctx, src, parsers, allError)
+		case OrModeTryFast:
+			return orTryFast(pctx, src, parsers, allError)
+		default: // OrModeSafe
+			return orSafe(pctx, src, parsers, allError)
 		}
 	})
+}
+
+// orSafe implements longest match logic (default, safe behavior)
+func orSafe[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T], allError []error) (int, []Token[T], error) {
+	var bestResult struct {
+		consumed  int
+		newTokens []Token[T]
+		hasResult bool
+	}
+
+	for _, p := range parsers {
+		consumed, newTokens, err := p(pctx, src)
+
+		if err == nil { // match
+			// Always choose the parser that consumes the most tokens (longest match)
+			if !bestResult.hasResult || consumed > bestResult.consumed {
+				bestResult.consumed = consumed
+				bestResult.newTokens = newTokens
+				bestResult.hasResult = true
+			}
+			continue
+		}
+
+		// not match - try other options for non-critical errors
+		if errors.Is(err, ErrNotMatch) || errors.Is(err, ErrRepeatCount) {
+			allError = append(allError, err)
+			continue
+		}
+		// critical error (including stack overflow)
+		return consumed, nil, err
+	}
+
+	if bestResult.hasResult {
+		return bestResult.consumed, bestResult.newTokens, nil
+	}
+
+	return 0, nil, &ParseError{
+		Parent: errors.Join(allError...), 
+		Pos: getFirstPos(src),
+	}
+}
+
+// orFast implements first match logic (performance optimized)
+func orFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T], allError []error) (int, []Token[T], error) {
+	for _, p := range parsers {
+		consumed, newTokens, err := p(pctx, src)
+
+		if err == nil { // match - return immediately (first match)
+			return consumed, newTokens, nil
+		}
+
+		// not match - try other options for non-critical errors
+		if errors.Is(err, ErrNotMatch) || errors.Is(err, ErrRepeatCount) {
+			allError = append(allError, err)
+			continue
+		}
+		// critical error (including stack overflow)
+		return consumed, nil, err
+	}
+
+	return 0, nil, &ParseError{
+		Parent: errors.Join(allError...), 
+		Pos: getFirstPos(src),
+	}
+}
+
+// orTryFast implements first match with warnings when longest match would differ
+func orTryFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T], allError []error) (int, []Token[T], error) {
+	var firstMatch struct {
+		consumed  int
+		newTokens []Token[T]
+		hasResult bool
+		index     int
+	}
+	var bestMatch struct {
+		consumed  int
+		newTokens []Token[T]
+		hasResult bool
+		index     int
+	}
+
+	for i, p := range parsers {
+		consumed, newTokens, err := p(pctx, src)
+
+		if err == nil { // match
+			// Record first match
+			if !firstMatch.hasResult {
+				firstMatch.consumed = consumed
+				firstMatch.newTokens = newTokens
+				firstMatch.hasResult = true
+				firstMatch.index = i
+			}
+			
+			// Record best match (longest)
+			if !bestMatch.hasResult || consumed > bestMatch.consumed {
+				bestMatch.consumed = consumed
+				bestMatch.newTokens = newTokens
+				bestMatch.hasResult = true
+				bestMatch.index = i
+			}
+			continue
+		}
+
+		// not match - try other options for non-critical errors
+		if errors.Is(err, ErrNotMatch) || errors.Is(err, ErrRepeatCount) {
+			allError = append(allError, err)
+			continue
+		}
+		// critical error (including stack overflow)
+		return consumed, nil, err
+	}
+
+	if firstMatch.hasResult {
+		// Check if longest match would choose differently
+		if bestMatch.hasResult && (firstMatch.index != bestMatch.index || firstMatch.consumed != bestMatch.consumed) {
+			pos := getFirstPos(src)
+			
+			// Get caller information using runtime to find where Or was called
+			var location string = "unknown location"
+			for i := 1; i < 15; i++ { // Check up to 15 levels
+				_, file, line, ok := runtime.Caller(i)
+				if ok {
+					// Skip our internal files (tools.go, parser.go) to find user code
+					if !strings.Contains(file, "tools.go") && 
+					   !strings.Contains(file, "parser.go") &&
+					   !strings.Contains(file, "/go/src/") &&
+					   !strings.Contains(file, "/usr/") {
+						// Extract just the filename from the full path
+						parts := strings.Split(file, "/")
+						filename := parts[len(parts)-1]
+						location = fmt.Sprintf("%s:%d", filename, line)
+						break
+					}
+				}
+			}
+			
+			fmt.Fprintf(os.Stderr, "⚠️  Or parser optimization suggestion at %s (parser position %s):\n", location, pos)
+			fmt.Fprintf(os.Stderr, "   Fast mode chose option %d (consumed %d tokens), but longest match would choose option %d (consumed %d tokens).\n", 
+				firstMatch.index+1, firstMatch.consumed, bestMatch.index+1, bestMatch.consumed)
+			fmt.Fprintf(os.Stderr, "   For Fast mode compatibility, consider moving option %d before option %d in your Or(...) call.\n", 
+				bestMatch.index+1, firstMatch.index+1)
+		}
+		return firstMatch.consumed, firstMatch.newTokens, nil
+	}
+
+	return 0, nil, &ParseError{
+		Parent: errors.Join(allError...), 
+		Pos: getFirstPos(src),
+	}
+}
+
+// Helper function to get position from source tokens
+func getFirstPos[T any](src []Token[T]) *Pos {
+	if len(src) > 0 {
+		return src[0].Pos
+	}
+	return nil
 }
 
 func Trans[T any](parser Parser[T], tf Transformer[T]) Parser[T] {
@@ -348,4 +497,35 @@ func Fail[T any](message string) Parser[T] {
 		}
 		return 0, nil, NewErrCritical(message, pos)
 	}
+}
+
+// OrWithMode creates an Or parser with specific mode for this instance
+func OrWithMode[T any](mode OrMode, parsers ...Parser[T]) Parser[T] {
+	return Trace("or", func(pctx *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
+		var allError []error
+		
+		switch mode {
+		case OrModeFast:
+			return orFast(pctx, src, parsers, allError)
+		case OrModeTryFast:
+			return orTryFast(pctx, src, parsers, allError)
+		default: // OrModeSafe
+			return orSafe(pctx, src, parsers, allError)
+		}
+	})
+}
+
+// FastOr creates an Or parser that uses first match (performance optimized)
+func FastOr[T any](parsers ...Parser[T]) Parser[T] {
+	return OrWithMode(OrModeFast, parsers...)
+}
+
+// SafeOr creates an Or parser that uses longest match (safe, default behavior)
+func SafeOr[T any](parsers ...Parser[T]) Parser[T] {
+	return OrWithMode(OrModeSafe, parsers...)
+}
+
+// TryFastOr creates an Or parser that uses first match but warns when longest match differs
+func TryFastOr[T any](parsers ...Parser[T]) Parser[T] {
+	return OrWithMode(OrModeTryFast, parsers...)
 }

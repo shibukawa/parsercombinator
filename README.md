@@ -26,6 +26,7 @@ package main
 
 import (
     "fmt"
+    "strconv"
     pc "github.com/shibukawa/parsercombinator"
 )
 
@@ -118,6 +119,57 @@ Tries parsers in order, returns first successful match:
 
 ```go
 parser := pc.Or(digit, string, identifier) // Matches any of the alternatives
+```
+
+### Choice Parsing with Or
+
+The `Or` parser tries multiple alternatives and returns the result from the parser that **consumes the most tokens** (longest match). This ensures predictable behavior and compatibility with complex expression patterns.
+
+```go
+// Basic usage - tries each parser in order, returns longest match
+parser := pc.Or(
+    longKeyword,    // e.g., "interface"
+    shortKeyword,   // e.g., "if"
+    identifier,     // e.g., "interfaceType"
+)
+
+// For input "interface", this will match longKeyword (9 tokens)
+// rather than shortKeyword (2 tokens), even if shortKeyword appears first
+```
+
+#### Important Considerations
+
+1. **Longest Match Behavior**: Always returns the alternative that consumes the most tokens
+2. **Order Independence**: For unambiguous grammars, parser order doesn't matter
+3. **Ambiguous Grammars**: Be careful with overlapping patterns
+
+```go
+// Good: Unambiguous alternatives
+parser := pc.Or(
+    stringLiteral,   // "hello"
+    numberLiteral,   // 42
+    identifier,      // variable
+)
+
+// Potentially problematic: Overlapping patterns
+parser := pc.Or(
+    pc.String("for"),     // exact match
+    identifier,           // any identifier (including "for")
+)
+// Solution: Put more specific patterns first or use longer matches
+```
+
+#### Working with Expression Parsing
+
+The longest match behavior is particularly useful for expression parsing:
+
+```go
+// Expression parser that handles operator precedence correctly
+expr := pc.Or(
+    binaryExpression,    // "a + b * c" (longer)
+    primaryExpression,   // "a" (shorter)
+)
+// Will correctly choose the longer binary expression
 ```
 
 ### Repetition

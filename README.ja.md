@@ -121,6 +121,57 @@ parser := pc.Seq(digit, operator, digit) // マッチ: digit operator digit
 parser := pc.Or(digit, string, identifier) // 選択肢のいずれかにマッチ
 ```
 
+### Or パーサーによる選択肢の解析
+
+`Or` パーサーは複数の選択肢を試行し、**最も多くのトークンを消費した**パーサーの結果を返します（最長一致）。これにより予測可能な動作と複雑な式パターンとの互換性を確保します。
+
+```go
+// 基本的な使用法 - 各パーサーを順番に試行し、最長一致を返す
+parser := pc.Or(
+    longKeyword,    // 例："interface"
+    shortKeyword,   // 例："if"
+    identifier,     // 例："interfaceType"
+)
+
+// 入力が "interface" の場合、shortKeyword が先に現れても
+// longKeyword（9トークン）が shortKeyword（2トークン）より選択される
+```
+
+#### 重要な考慮事項
+
+1. **最長一致の動作**: 常に最も多くのトークンを消費する選択肢を返します
+2. **順序の独立性**: 曖昧でない文法では、パーサーの順序は重要ではありません
+3. **曖昧な文法**: 重複するパターンには注意が必要です
+
+```go
+// 良い例: 曖昧でない選択肢
+parser := pc.Or(
+    stringLiteral,   // "hello"
+    numberLiteral,   // 42
+    identifier,      // variable
+)
+
+// 問題となる可能性: 重複するパターン
+parser := pc.Or(
+    pc.String("for"),     // 完全一致
+    identifier,           // 任意の識別子（"for"を含む）
+)
+// 解決策: より具体的なパターンを先に置くか、より長い一致を使用
+```
+
+#### 式解析での活用
+
+最長一致の動作は式解析で特に有用です：
+
+```go
+// 演算子の優先順位を正しく処理する式パーサー
+expr := pc.Or(
+    binaryExpression,    // "a + b * c" (より長い)
+    primaryExpression,   // "a" (より短い)
+)
+// より長い二項式を正しく選択します
+```
+
 ### 繰り返し
 
 - `ZeroOrMore`: 0回以上の出現にマッチ
@@ -226,17 +277,174 @@ parser := expressionBody(
 )
 ```
 
-### デバッグとトレース
+### 左再帰の問題と解決方法
+
+**注意**: 直接的な左再帰は無限ループを引き起こします。以下のような定義は避ける必要があります：
 
 ```go
-context := pc.NewParseContext[int]()
-context.TraceEnable = true // トレースを有効化
+// ❌ 危険: 左再帰による無限ループ
+expressionBody, expression := pc.NewAlias[Entity]("expression")
+expression = expressionBody(
+    pc.Or(
+        pc.Seq(expression, operator(), expression), // ← 最初のexpressionで無限ループ！
+        pc.Seq(leftParen(), expression, rightParen()),
+        literal(),
+    ),
+)
+```
 
-result, err := pc.EvaluateWithRawTokens(context, input, parser)
+#### 解決策1: 右再帰による書き換え
 
-// トレース情報を出力
-context.DumpTrace() // 標準出力に出力
-traceText := context.DumpTraceAsText() // 文字列として取得
+左再帰を右再帰に変換することで問題を解決できます：
+
+```go
+// ✅ 安全: 右再帰による実装
+expressionBody, expression := pc.NewAlias[Entity]("expression")
+expression = expressionBody(
+    pc.Or(
+        // 基本要素を最初に配置
+        literal(),
+        pc.Seq(leftParen(), expression, rightParen()),
+        // 二項演算は右再帰で定義
+        pc.Seq(literal(), operator(), expression),
+    ),
+)
+```
+
+#### 解決策2: 優先順位を考慮した階層設計
+
+より実用的なアプローチとして、演算子の優先順位を考慮した階層構造を使用します：
+
+```go
+var (
+    expression     pc.Parser[Entity]
+    additive       pc.Parser[Entity] // + -
+    multiplicative pc.Parser[Entity] // * /
+    primary        pc.Parser[Entity] // 基本要素
+)
+
+func init() {
+    // 最下位: 基本要素（数値、変数、括弧付き式）
+    primary = pc.Or(
+        literal(),
+        identifier(),
+        pc.Trans(
+            pc.Seq(leftParen(), pc.Lazy(func() pc.Parser[Entity] { return expression }), rightParen()),
+            func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+                // 括弧内の式をそのまま返す
+                return []pc.Token[Entity]{tokens[1]}, nil
+            },
+        ),
+    )
+
+    // 中位: 乗算・除算（高優先度）
+    multiplicative = pc.Trans(
+        pc.Seq(
+            primary,
+            pc.ZeroOrMore("mul_ops", pc.Seq(multiplyOperator(), primary)),
+        ),
+        buildLeftAssociativeExpression,
+    )
+
+    // 上位: 加算・減算（低優先度）
+    additive = pc.Trans(
+        pc.Seq(
+            multiplicative,
+            pc.ZeroOrMore("add_ops", pc.Seq(addOperator(), multiplicative)),
+        ),
+        buildLeftAssociativeExpression,
+    )
+
+    expression = additive
+}
+
+// 左結合の二項演算を構築するヘルパー関数
+func buildLeftAssociativeExpression(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+    result := tokens[0] // 最初の項
+
+    // ZeroOrMoreの結果を処理（演算子と項のペアの配列）
+    if len(tokens) > 1 {
+        operations := tokens[1] // ZeroOrMoreの結果
+        // operationsの各要素に対して左結合で処理
+        for _, op := range operations.Val.([]Operation) {
+            operator := op.Operator
+            operand := op.Operand
+            
+            // 新しい二項演算ノードを作成
+            result = createBinaryOpNode(result, operator, operand)
+        }
+    }
+
+    return []pc.Token[Entity]{result}, nil
+}
+```
+
+#### 解決策3: `pc.Lazy`を使った循環参照の回避
+
+`pc.Lazy`を使用して、パーサーの初期化時点での循環参照を回避できます：
+
+```go
+var expression pc.Parser[Entity]
+
+func init() {
+    primary := pc.Or(
+        literal(),
+        identifier(),
+        // 括弧付き式: Lazyで遅延評価
+        pc.Trans(
+            pc.Seq(
+                leftParen(),
+                pc.Lazy(func() pc.Parser[Entity] { return expression }),
+                rightParen(),
+            ),
+            func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+                return []pc.Token[Entity]{tokens[1]}, nil
+            },
+        ),
+    )
+
+    // 右再帰で二項演算を定義
+    expression = pc.Or(
+        // 二項演算: primary operator expression
+        pc.Trans(
+            pc.Seq(
+                primary,
+                operator(),
+                pc.Lazy(func() pc.Parser[Entity] { return expression }),
+            ),
+            func(pctx *pc.ParseContext[Entity], tokens []pc.Token[Entity]) ([]pc.Token[Entity], error) {
+                left := tokens[0].Val.(ExprNode)
+                op := tokens[1].Val.(string)
+                right := tokens[2].Val.(ExprNode)
+                
+                binaryNode := &BinaryOpNode{Left: left, Op: op, Right: right}
+                return []pc.Token[Entity]{{
+                    Type: "expression",
+                    Pos:  tokens[0].Pos,
+                    Val:  binaryNode,
+                }}, nil
+            },
+        ),
+        primary,
+    )
+}
+
+func main() {
+    context := pc.NewParseContext[Entity]()
+    context.TraceEnable = true
+    
+    input := []string{"10", "+", "5"}
+    result, err := pc.EvaluateWithRawTokens(context, input, Expression())
+    
+    if err != nil {
+        fmt.Printf("エラー: %v\n", err)
+        return
+    }
+    
+    expr := result[0].(ExprNode)
+    fmt.Printf("式: %s\n", expr.String())     // (1 + (2 * 3))
+    fmt.Printf("結果: %d\n", expr.Eval())     // 7
+}
 ```
 
 ## エラータイプ
@@ -384,11 +592,12 @@ func main() {
     
     if err != nil {
         fmt.Printf("エラー: %v\n", err)
-        context.DumpTrace()
         return
     }
     
-    fmt.Printf("結果: %d\n", result[0]) // 出力: 15
+    expr := result[0].(ExprNode)
+    fmt.Printf("式: %s\n", expr.String())     // (1 + (2 * 3))
+    fmt.Printf("結果: %d\n", expr.Eval())     // 7
 }
 ```
 
@@ -697,8 +906,6 @@ func CompileProgram(input []string) (*Program, error) {
     return &Program{AST: optimizedAST, Code: code}, nil
 }
 ```
-
-このように、パーサコンビネータは構文解析段階で使用し、その後の処理は従来のAST処理パターン（Visitor、Transform、マルチパス）を組み合わせることで、実用的なコンパイラを構築できます。
 
 ## 構造化データの検証パターン
 
@@ -1066,3 +1273,41 @@ Apache 2.0 License - 詳細はLICENSEファイルを参照してください。
 - [英語版README](README.md)
 - [APIドキュメント](https://pkg.go.dev/github.com/shibukawa/parsercombinator)
 - [サンプルコード](examples/)
+
+#### パフォーマンスモード
+
+Or パーサーは安全性とパフォーマンスのバランスを取るために異なるモードをサポートします：
+
+```go
+pc := pc.NewParseContext[int]()
+
+// Safeモード（デフォルト） - 一貫した動作のために最長一致を使用
+pc.OrMode = pc.OrModeSafe
+
+// Fastモード - より良いパフォーマンスのために最初のマッチを使用
+pc.OrMode = pc.OrModeFast
+
+// TryFastモード - 最初のマッチを使用するが、最長一致と異なる場合に警告
+pc.OrMode = pc.OrModeTryFast
+```
+
+**モードの比較:**
+
+- **Safeモード**（デフォルト）: 常に最長一致を選択。最も安全で予測可能。
+- **Fastモード**: 最初に成功したマッチを選択。パフォーマンスが向上するが、パーサーの順序に注意が必要。
+- **TryFastモード**: 最初のマッチを使用するが、最長一致と異なる選択をする場合に最適化の提案を表示。
+
+**TryFastモードの警告例:**
+```
+⚠️  Or parser optimization suggestion at myparser.go:42 (parser position 0):
+   Fast mode chose option 1 (consumed 2 tokens), but longest match would choose option 2 (consumed 3 tokens).
+   For Fast mode compatibility, consider moving option 2 before option 1 in your Or(...) call.
+```
+
+**ヘルパー関数:**
+```go
+// モードを簡単に設定
+pc.SetSafeMode()    // 最長一致（デフォルト）
+pc.SetFastMode()    // 最初のマッチ
+pc.SetTryFastMode() // 最初のマッチ（警告付き）
+```
