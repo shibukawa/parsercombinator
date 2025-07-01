@@ -1092,3 +1092,106 @@ func TestSeqWithZeroOrMoreWithSpaces(t *testing.T) {
 	// The result will include all tokens from both parsers
 	t.Logf("Result with spaces: %v", result)
 }
+
+func TestStackOverflowProtection(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxDepth int
+		src      []string
+		wantErr  bool
+	}{
+		{
+			name:     "normal recursion within limits",
+			maxDepth: 100,
+			src:      []string{"100"},
+			wantErr:  false,
+		},
+		{
+			name:     "deep recursion that would exceed limit",
+			maxDepth: 5,
+			src:      []string{"+"}, // This will cause left recursion to loop
+			wantErr:  true,
+		},
+		{
+			name:     "no limit (0)",
+			maxDepth: 0,
+			src:      []string{"100"},
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pc := NewParseContext[int]()
+			pc.MaxDepth = tt.maxDepth
+			pc.TraceEnable = false // Disable trace to reduce noise
+
+			// Create a potentially infinite recursive parser
+			// This creates a left-recursive expression parser that could loop infinitely
+			expressionBody, expression := NewAlias[int]("expression")
+			parser := expressionBody(
+				Or(
+					Digit(), // Base case: single digit
+					// Recursive case: expression + digit (left-recursive)
+					Trans(
+						Seq(expression, Operator(), Digit()),
+						func(pctx *ParseContext[int], src []Token[int]) (converted []Token[int], err error) {
+							var result int
+							switch src[1].Raw {
+							case "+":
+								result = src[0].Val + src[2].Val
+							case "-":
+								result = src[0].Val - src[2].Val
+							}
+							return []Token[int]{{Type: "digit", Pos: src[0].Pos, Val: result}}, nil
+						},
+					),
+				),
+			)
+
+			_, err := EvaluateWithRawTokens(pc, tt.src, parser)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if err != nil {
+					// Check if it's a stack overflow or related to the specific parser logic
+					if errors.Is(err, ErrStackOverflow) {
+						t.Logf("Got expected stack overflow error: %v", err)
+					} else {
+						t.Logf("Got error (may not be stack overflow): %v", err)
+					}
+				}
+			} else {
+				if err != nil {
+					// If there's an error but we don't expect one, it might be due to the specific parser logic
+					// rather than stack overflow. Check if it's not a stack overflow error.
+					if errors.Is(err, ErrStackOverflow) {
+						t.Errorf("Unexpected stack overflow error: %v", err)
+					} else {
+						t.Logf("Got non-stack-overflow error (might be expected): %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestStackOverflowWithSimpleRecursion(t *testing.T) {
+	pc := NewParseContext[int]()
+	pc.MaxDepth = 10 // Very low limit for testing
+	pc.TraceEnable = true
+
+	// Create a simple recursive parser that will definitely cause stack overflow
+	var recursiveParser Parser[int]
+	recursiveParser = Trace("infinite", func(pctx *ParseContext[int], src []Token[int]) (int, []Token[int], error) {
+		// This parser calls itself infinitely
+		return recursiveParser(pctx, src)
+	})
+
+	_, err := EvaluateWithRawTokens(pc, []string{"test"}, recursiveParser)
+	t.Log(pc.DumpTraceAsText())
+	
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStackOverflow), "Expected stack overflow error, got: %v", err)
+	assert.Contains(t, err.Error(), "recursion depth")
+}

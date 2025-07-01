@@ -7,6 +7,7 @@
 - **トークンベースのパーシング**: 生の文字列ではなく、事前にトークン化された入力で動作
 - **型安全**: Goのジェネリクスを活用した型安全性
 - **包括的なエラーハンドリング**: カスタムメッセージによる高度なエラー報告
+- **スタックオーバーフロー保護**: 無限ループを防ぐための組み込み再帰深度制限
 - **デバッグサポート**: 組み込まれたトレース機能
 - **復旧メカニズム**: 堅牢なパーシングのためのエラー復旧
 - **先読みサポート**: 正と負の先読み操作
@@ -96,7 +97,9 @@ type ParseContext[T any] struct {
     Results        []Token[T]     // パース結果トークン
     Traces         []*TraceInfo   // デバッグトレース
     Errors         []*ParseError  // 収集されたエラー
+    Depth          int            // 現在の再帰深度
     TraceEnable    bool           // トレースの有効/無効
+    MaxDepth       int            // 最大許可再帰深度（0 = 制限なし）
 }
 ```
 
@@ -243,11 +246,76 @@ traceText := context.DumpTraceAsText() // 文字列として取得
 - `ErrNotMatch`: パーサーがマッチしない（復旧可能）
 - `ErrRepeatCount`: 繰り返し回数が条件を満たさない（復旧可能）
 - `ErrCritical`: 致命的エラー（復旧不可能）
+- `ErrStackOverflow`: 再帰深度が最大制限を超えた（無限ループを防ぐ）
 
 ```go
 // カスタムエラーを作成
 err := pc.NewErrNotMatch("期待値", "実際値", position)
 err := pc.NewErrCritical("致命的エラー", position)
+err := pc.NewErrStackOverflow(currentDepth, maxDepth, position)
+```
+
+## スタックオーバーフロー保護
+
+ライブラリは、再帰パーサーでの無限ループを防ぐために、スタック深度制限による組み込み保護機能を提供しています。
+
+### 設定
+
+```go
+// カスタムスタック深度制限を設定
+context := pc.NewParseContext[int]()
+context.MaxDepth = 50  // 最大再帰深度を50に設定
+
+// 制限を無効化（0に設定）
+context.MaxDepth = 0   // 制限なし（注意して使用）
+
+// デフォルト制限
+fmt.Println(pc.NewParseContext[int]().MaxDepth) // 1000（デフォルト）
+```
+
+### エラーハンドリング
+
+再帰深度が制限を超えた場合、`ErrStackOverflow`エラーが返されます：
+
+```go
+result, err := pc.EvaluateWithRawTokens(context, input, parser)
+if err != nil {
+    if errors.Is(err, pc.ErrStackOverflow) {
+        fmt.Printf("スタックオーバーフローが検出されました: %v\n", err)
+        // 無限再帰の場合の処理
+    }
+}
+```
+
+### 使用例
+
+この保護機能は特に以下の場合に有用です：
+
+- **左再帰文法**: 無限左再帰の検出と防止
+- **不正な入力**: 予期しない入力パターンでの暴走パーシングの停止
+- **開発デバッグ**: 再帰パーサーロジックエラーの早期発見
+- **本番環境の安全性**: 悪意のあるまたは不正な入力からのサーバークラッシュ防止
+
+### 例: 保護された再帰パーサー
+
+```go
+// 特定の入力で無限ループする可能性があるパーサー
+expressionBody, expression := pc.NewAlias[int]("expression")
+parser := expressionBody(
+    pc.Or(
+        pc.Digit(),                                    // ベースケース
+        pc.Seq(expression, pc.Operator(), pc.Digit()), // 再帰ケース（左再帰！）
+    ),
+)
+
+context := pc.NewParseContext[int]()
+context.MaxDepth = 10 // デモンストレーション用の低い制限
+
+// これは安全に捕捉されて停止されます
+result, err := pc.EvaluateWithRawTokens(context, []string{"+"}, parser)
+if errors.Is(err, pc.ErrStackOverflow) {
+    fmt.Println("無限再帰が検出され、防止されました！")
+}
 ```
 
 ## 完全な例: 数式表現

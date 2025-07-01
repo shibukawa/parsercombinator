@@ -35,6 +35,10 @@ var (
 	// It is not just structure error that doesn't have extra options.
 	// Repeat, Or don't ignore this error
 	ErrCritical = fmt.Errorf("critical error")
+
+	// ErrStackOverflow means the parser recursion depth exceeded the maximum limit
+	// This prevents infinite loops in recursive parsers
+	ErrStackOverflow = fmt.Errorf("stack overflow")
 )
 
 func NewErrNotMatch(expected, actual string, pos *Pos) error {
@@ -60,6 +64,13 @@ func NewErrRepeatCount(label string, expected, actual int, pos *Pos) error {
 func NewErrCritical(message string, pos *Pos) error {
 	return &ParseError{
 		Parent: fmt.Errorf("%w: %s", ErrCritical, message),
+		Pos:    pos,
+	}
+}
+
+func NewErrStackOverflow(currentDepth, maxDepth int, pos *Pos) error {
+	return &ParseError{
+		Parent: fmt.Errorf("%w: recursion depth %d exceeded maximum %d", ErrStackOverflow, currentDepth, maxDepth),
 		Pos:    pos,
 	}
 }

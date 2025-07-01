@@ -7,6 +7,7 @@ A powerful and flexible parser combinator library for Go, specifically designed 
 - **Token-based parsing**: Works with pre-tokenized input rather than raw strings
 - **Type-safe**: Leverages Go's generics for type safety
 - **Comprehensive error handling**: Advanced error reporting with custom messages
+- **Stack overflow protection**: Built-in recursion depth limiting to prevent infinite loops
 - **Debugging support**: Built-in tracing capabilities
 - **Recovery mechanisms**: Error recovery for robust parsing
 - **Lookahead support**: Positive and negative lookahead operations
@@ -95,7 +96,9 @@ type ParseContext[T any] struct {
     Results        []Token[T]     // Parsed result tokens
     Traces         []*TraceInfo   // Debug traces
     Errors         []*ParseError  // Collected errors
+    Depth          int            // Current recursion depth
     TraceEnable    bool           // Enable/disable tracing
+    MaxDepth       int            // Maximum allowed recursion depth (0 = no limit)
 }
 ```
 
@@ -242,11 +245,76 @@ The library defines several error types:
 - `ErrNotMatch`: Parser doesn't match (recoverable)
 - `ErrRepeatCount`: Repetition count not met (recoverable) 
 - `ErrCritical`: Critical error (not recoverable)
+- `ErrStackOverflow`: Recursion depth exceeded maximum limit (prevents infinite loops)
 
 ```go
 // Create custom errors
 err := pc.NewErrNotMatch("expected", "actual", position)
 err := pc.NewErrCritical("fatal error", position)
+err := pc.NewErrStackOverflow(currentDepth, maxDepth, position)
+```
+
+## Stack Overflow Protection
+
+The library includes built-in protection against infinite loops in recursive parsers through stack depth limiting.
+
+### Configuration
+
+```go
+// Set custom stack depth limit
+context := pc.NewParseContext[int]()
+context.MaxDepth = 50  // Maximum recursion depth of 50
+
+// Disable limit (set to 0)
+context.MaxDepth = 0   // No limit (use with caution)
+
+// Default limit
+fmt.Println(pc.NewParseContext[int]().MaxDepth) // 1000 (default)
+```
+
+### Error Handling
+
+When the recursion depth exceeds the limit, an `ErrStackOverflow` error is returned:
+
+```go
+result, err := pc.EvaluateWithRawTokens(context, input, parser)
+if err != nil {
+    if errors.Is(err, pc.ErrStackOverflow) {
+        fmt.Printf("Stack overflow detected: %v\n", err)
+        // Handle infinite recursion case
+    }
+}
+```
+
+### Use Cases
+
+This protection is particularly useful for:
+
+- **Left-recursive grammars**: Detecting and preventing infinite left recursion
+- **Malformed input**: Stopping runaway parsing on unexpected input patterns  
+- **Development debugging**: Catching recursive parser logic errors early
+- **Production safety**: Preventing server crashes from malicious or malformed input
+
+### Example: Protected Recursive Parser
+
+```go
+// This parser could potentially loop infinitely on certain inputs
+expressionBody, expression := pc.NewAlias[int]("expression")
+parser := expressionBody(
+    pc.Or(
+        pc.Digit(),                                    // Base case
+        pc.Seq(expression, pc.Operator(), pc.Digit()), // Recursive case (left-recursive!)
+    ),
+)
+
+context := pc.NewParseContext[int]()
+context.MaxDepth = 10 // Low limit for demonstration
+
+// This will be caught and stopped safely
+result, err := pc.EvaluateWithRawTokens(context, []string{"+"}, parser)
+if errors.Is(err, pc.ErrStackOverflow) {
+    fmt.Println("Infinite recursion detected and prevented!")
+}
 ```
 
 ## Complete Example: Mathematical Expressions

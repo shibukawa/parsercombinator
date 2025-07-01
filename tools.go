@@ -31,17 +31,23 @@ func (a *Alias[T]) define(alias Parser[T]) Parser[T] {
 func Trace[T any](name string, p Parser[T]) Parser[T] {
 	return func(pctx *ParseContext[T], tokens []Token[T]) (int, []Token[T], error) {
 		var pos *Pos
+		if len(tokens) > 0 {
+			pos = tokens[0].Pos
+		}
+
+		// Check stack depth before proceeding
+		if err := pctx.CheckDepthAndIncrement(pos); err != nil {
+			return 0, nil, err
+		}
+		defer pctx.DecrementDepth()
+
 		if pctx.TraceEnable {
-			if len(tokens) > 0 {
-				pos = tokens[0].Pos
-			}
 			pctx.Traces = append(pctx.Traces, &TraceInfo{
 				TraceType: Enter,
-				Depth:     pctx.Depth,
+				Depth:     pctx.Depth - 1, // Use actual depth for display
 				Name:      name,
 				Pos:       pos,
 			})
-			pctx.Depth++
 		}
 		traceIndex := len(pctx.Traces)
 		consumed, newTokens, err := p(pctx, tokens)
@@ -65,7 +71,6 @@ func Trace[T any](name string, p Parser[T]) Parser[T] {
 				builder.WriteString("]")
 				result = builder.String()
 			}
-			pctx.Depth--
 			if len(pctx.Traces) == traceIndex {
 				lastTrace := pctx.Traces[len(pctx.Traces)-1]
 				if tt == NotMatch {
@@ -77,7 +82,7 @@ func Trace[T any](name string, p Parser[T]) Parser[T] {
 			} else {
 				pctx.Traces = append(pctx.Traces, &TraceInfo{
 					TraceType: tt,
-					Depth:     pctx.Depth,
+					Depth:     pctx.Depth - 1, // Use actual depth for display
 					Name:      name,
 					Pos:       pos,
 					Result:    result,

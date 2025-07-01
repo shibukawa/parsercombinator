@@ -94,6 +94,7 @@ type ParseContext[T any] struct {
 	Errors         []*ParseError
 	Depth          int
 	TraceEnable    bool
+	MaxDepth       int // Maximum allowed recursion depth (0 means no limit)
 }
 
 func (pc *ParseContext[T]) AppendError(err error, pos *Pos) error {
@@ -144,5 +145,21 @@ func (pc *ParseContext[T]) DumpTraceTo(w io.Writer) {
 }
 
 func NewParseContext[T any]() *ParseContext[T] {
-	return &ParseContext[T]{}
+	return &ParseContext[T]{
+		MaxDepth: 1000, // Default maximum depth limit
+	}
+}
+
+func (pc *ParseContext[T]) CheckDepthAndIncrement(pos *Pos) error {
+	if pc.MaxDepth > 0 && pc.Depth >= pc.MaxDepth {
+		return NewErrStackOverflow(pc.Depth, pc.MaxDepth, pos)
+	}
+	pc.Depth++
+	return nil
+}
+
+func (pc *ParseContext[T]) DecrementDepth() {
+	if pc.Depth > 0 {
+		pc.Depth--
+	}
 }
