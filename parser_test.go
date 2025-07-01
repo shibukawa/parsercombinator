@@ -1247,7 +1247,7 @@ func TestOrModes(t *testing.T) {
 	// Create parsers for testing mode differences
 	shortMatch := Seq(String(), String())          // matches 2 tokens, returns faster
 	longMatch := Seq(String(), String(), String()) // matches 3 tokens, but slower
-	
+
 	testInput := []string{"a", "b", "c"}
 
 	tests := []struct {
@@ -1287,7 +1287,7 @@ func TestOrModes(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, tt.expected, len(pc.Results), 
+			assert.Equal(t, tt.expected, len(pc.Results),
 				"Mode %s should produce %d results", tt.mode, tt.expected)
 		})
 	}
@@ -1297,14 +1297,14 @@ func TestOrModes(t *testing.T) {
 func TestOrModePerformance(t *testing.T) {
 	pc1 := NewParseContext[int]()
 	pc1.OrMode = OrModeSafe
-	
+
 	pc2 := NewParseContext[int]()
 	pc2.OrMode = OrModeFast
 
 	// Create a more complex scenario where performance difference matters
 	failingParser1 := Seq(String(), String(), String(), String()) // fails
 	failingParser2 := Seq(String(), String(), String(), Digit())  // fails
-	succeedingParser := String() // succeeds immediately
+	succeedingParser := String()                                  // succeeds immediately
 
 	parser := Or(failingParser1, failingParser2, succeedingParser)
 	testInput := []string{"hello"}
@@ -1318,7 +1318,7 @@ func TestOrModePerformance(t *testing.T) {
 	assert.NoError(t, err2, "Fast mode should succeed")
 
 	// Both should have same final result for this case
-	assert.Equal(t, len(pc1.Results), len(pc2.Results), 
+	assert.Equal(t, len(pc1.Results), len(pc2.Results),
 		"Both modes should produce same result count for this case")
 }
 
@@ -1336,7 +1336,7 @@ func TestOrModeWithAmbiguousGrammar(t *testing.T) {
 
 	// "interface" vs "if" - both could match "interface" but with different consumptions
 	interfaceParser := specificKeyword("interface") // 9 characters
-	ifParser := specificKeyword("if")              // 2 characters (prefix of "interface")
+	ifParser := specificKeyword("if")               // 2 characters (prefix of "interface")
 
 	tests := []struct {
 		name     string
@@ -1369,7 +1369,7 @@ func TestOrModeWithAmbiguousGrammar(t *testing.T) {
 			// For this test, we need to handle partial matches properly
 			// The "if" parser should only match if the input is exactly "if", not "interface"
 			// Let's modify this test to use a more realistic scenario
-			
+
 			if tt.input == "interface" && tt.mode == OrModeFast {
 				// In practice, the "if" parser should not match "interface" as a prefix
 				// This test case needs refinement based on actual parser implementation
@@ -1401,7 +1401,7 @@ func TestOrHelperFunctions(t *testing.T) {
 			expected: 3,
 		},
 		{
-			name:     "FastOr - first match", 
+			name:     "FastOr - first match",
 			parser:   FastOr(shortMatch, longMatch),
 			expected: 2,
 		},
@@ -1423,7 +1423,7 @@ func TestOrHelperFunctions(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, tt.expected, len(pc.Results), 
+			assert.Equal(t, tt.expected, len(pc.Results),
 				"Helper function should produce expected result count")
 		})
 	}
@@ -1478,7 +1478,7 @@ func TestOrModeRealisticScenario(t *testing.T) {
 			// This is a common mistake - longer/more specific patterns should come first
 			parser := Or(
 				keyword("if"),        // option 1: 2 tokens
-				keyword("interface"), // option 2: 9 tokens  
+				keyword("interface"), // option 2: 9 tokens
 				identifier,           // option 3: 1 token
 			)
 
@@ -1486,7 +1486,7 @@ func TestOrModeRealisticScenario(t *testing.T) {
 			if err != nil {
 				t.Logf("Parser error (expected in some cases): %v", err)
 			}
-			
+
 			// The warning should be printed to stderr
 			t.Logf("Check stderr for optimization suggestion")
 		})
@@ -1498,22 +1498,22 @@ func TestOrModeTryFastWarning(t *testing.T) {
 	pc := NewParseContext[int]()
 	pc.OrMode = OrModeTryFast
 	pc.TraceEnable = false
-	
+
 	// Create parsers where order matters for demonstration
-	shortParser := Seq(String(), String()) // consumes 2 tokens
+	shortParser := Seq(String(), String())          // consumes 2 tokens
 	longParser := Seq(String(), String(), String()) // consumes 3 tokens
-	
+
 	// Put short parser first (suboptimal for Fast mode)
 	parser := Or(shortParser, longParser)
-	
+
 	// This should trigger a warning because longParser would consume more
 	src := []string{"a", "b", "c"}
 	_, err := EvaluateWithRawTokens(pc, src, parser)
-	
+
 	// The test should succeed, but we expect a warning on stderr
 	if err != nil {
 		t.Logf("Parser error: %v", err)
 	}
-	
+
 	t.Logf("Expected warning message should appear above")
 }

@@ -94,7 +94,7 @@ type ParseContext[T any] struct {
 	Errors         []*ParseError
 	Depth          int
 	TraceEnable    bool
-	MaxDepth       int // Maximum allowed recursion depth (0 means no limit)
+	MaxDepth       int    // Maximum allowed recursion depth (0 means no limit)
 	OrMode         OrMode // Or parser behavior mode (default: OrModeSafe)
 }
 
@@ -147,7 +147,7 @@ func (pc *ParseContext[T]) DumpTraceTo(w io.Writer) {
 
 func NewParseContext[T any]() *ParseContext[T] {
 	return &ParseContext[T]{
-		MaxDepth: 1000, // Default maximum depth limit
+		MaxDepth: 1000,       // Default maximum depth limit
 		OrMode:   OrModeSafe, // Default Or parser behavior mode
 	}
 }

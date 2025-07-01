@@ -136,7 +136,7 @@ func SeqWithLabel[T any](label string, parsers ...Parser[T]) Parser[T] {
 func Or[T any](parsers ...Parser[T]) Parser[T] {
 	return Trace("or", func(pctx *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
 		var allError []error
-		
+
 		switch pctx.OrMode {
 		case OrModeFast:
 			return orFast(pctx, src, parsers, allError)
@@ -183,8 +183,8 @@ func orSafe[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T], a
 	}
 
 	return 0, nil, &ParseError{
-		Parent: errors.Join(allError...), 
-		Pos: getFirstPos(src),
+		Parent: errors.Join(allError...),
+		Pos:    getFirstPos(src),
 	}
 }
 
@@ -207,8 +207,8 @@ func orFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T], a
 	}
 
 	return 0, nil, &ParseError{
-		Parent: errors.Join(allError...), 
-		Pos: getFirstPos(src),
+		Parent: errors.Join(allError...),
+		Pos:    getFirstPos(src),
 	}
 }
 
@@ -238,7 +238,7 @@ func orTryFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T]
 				firstMatch.hasResult = true
 				firstMatch.index = i
 			}
-			
+
 			// Record best match (longest)
 			if !bestMatch.hasResult || consumed > bestMatch.consumed {
 				bestMatch.consumed = consumed
@@ -262,17 +262,17 @@ func orTryFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T]
 		// Check if longest match would choose differently
 		if bestMatch.hasResult && (firstMatch.index != bestMatch.index || firstMatch.consumed != bestMatch.consumed) {
 			pos := getFirstPos(src)
-			
+
 			// Get caller information using runtime to find where Or was called
 			var location string = "unknown location"
 			for i := 1; i < 15; i++ { // Check up to 15 levels
 				_, file, line, ok := runtime.Caller(i)
 				if ok {
 					// Skip our internal files (tools.go, parser.go) to find user code
-					if !strings.Contains(file, "tools.go") && 
-					   !strings.Contains(file, "parser.go") &&
-					   !strings.Contains(file, "/go/src/") &&
-					   !strings.Contains(file, "/usr/") {
+					if !strings.Contains(file, "tools.go") &&
+						!strings.Contains(file, "parser.go") &&
+						!strings.Contains(file, "/go/src/") &&
+						!strings.Contains(file, "/usr/") {
 						// Extract just the filename from the full path
 						parts := strings.Split(file, "/")
 						filename := parts[len(parts)-1]
@@ -281,19 +281,19 @@ func orTryFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T]
 					}
 				}
 			}
-			
+
 			fmt.Fprintf(os.Stderr, "⚠️  Or parser optimization suggestion at %s (parser position %s):\n", location, pos)
-			fmt.Fprintf(os.Stderr, "   Fast mode chose option %d (consumed %d tokens), but longest match would choose option %d (consumed %d tokens).\n", 
+			fmt.Fprintf(os.Stderr, "   Fast mode chose option %d (consumed %d tokens), but longest match would choose option %d (consumed %d tokens).\n",
 				firstMatch.index+1, firstMatch.consumed, bestMatch.index+1, bestMatch.consumed)
-			fmt.Fprintf(os.Stderr, "   For Fast mode compatibility, consider moving option %d before option %d in your Or(...) call.\n", 
+			fmt.Fprintf(os.Stderr, "   For Fast mode compatibility, consider moving option %d before option %d in your Or(...) call.\n",
 				bestMatch.index+1, firstMatch.index+1)
 		}
 		return firstMatch.consumed, firstMatch.newTokens, nil
 	}
 
 	return 0, nil, &ParseError{
-		Parent: errors.Join(allError...), 
-		Pos: getFirstPos(src),
+		Parent: errors.Join(allError...),
+		Pos:    getFirstPos(src),
 	}
 }
 
@@ -503,7 +503,7 @@ func Fail[T any](message string) Parser[T] {
 func OrWithMode[T any](mode OrMode, parsers ...Parser[T]) Parser[T] {
 	return Trace("or", func(pctx *ParseContext[T], src []Token[T]) (int, []Token[T], error) {
 		var allError []error
-		
+
 		switch mode {
 		case OrModeFast:
 			return orFast(pctx, src, parsers, allError)
