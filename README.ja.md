@@ -931,51 +931,67 @@ pc.FindIter(ctx, quotedStringParser, tokens, func(match []pc.Token[T]) bool {
 
 部分一致・段階的パースを簡単に実現するためのユーティリティAPIです：
 
+
 ### `Find`
 
-パーサーが最初にマッチした箇所を探し、マッチ前・マッチ部分・マッチ後のトークン列を返します。
+パーサーが最初にマッチした箇所を探し、マッチ前・マッチ部分・マッチ後のトークン列、消費数、マッチ有無を返します。
 
 ```go
-before, match, after, found := pc.Find(ctx, parser, tokens)
+before, match, consumed, after, found := pc.Find(ctx, parser, tokens)
 ```
 - `before`: マッチ前のトークン列
 - `match`: マッチしたトークン列
+- `consumed`: マッチで消費したトークン数
 - `after`: マッチ後のトークン列
 - `found`: マッチが見つかったかどうか
 
 
+
 ### `Split`
 
-セパレータパーサーでトークン列を分割し、各区切りごとに`Pair`構造体（スキップ部分とマッチ部分のトークン列のセット）のスライスを返します。最後の要素は`Match`が`nil`、`Skipped`が残りのトークン列になります（`strings.Split`に似ていますが、より詳細な情報を持ちます）。
+セパレータパーサーでトークン列を分割し、各区切りごとに`SplitResult`構造体（スキップ部分・マッチ部分・消費数・インデックス）を返します。最後の要素は`Match`が`nil`、`Skipped`が残りのトークン列になります（`strings.Split`に似ていますが、より詳細な情報を持ちます）。
 
 ```go
-for _, pair := range pc.Split(ctx, sepParser, tokens) {
-    // pair.Skipped: セパレータ前のトークン列
-    // pair.Match:   セパレータにマッチ・変換されたトークン列（最後はnil）
+for _, consume := range pc.Split(ctx, sepParser, tokens) {
+    // consume.Skipped:  セパレータ前のトークン列
+    // consume.Match:    セパレータにマッチ・変換されたトークン列（最後はnil）
+    // consume.Consumed: Match生成で消費したトークン数
+    // consume.Last:     ループの最後かどうか
 }
 ```
+
 
 ### `SplitN`
 
-セパレータパーサーで最大N個まで分割し、`Pair`構造体のスライスを返します（`Split`と同様だが分割数に上限）。
+セパレータパーサーで最大N個まで分割し、`SplitResult`構造体のスライスを返します（`Split`と同様だが分割数に上限）。
 
 ```go
-for _, pair := range pc.SplitN(ctx, sepParser, tokens, n) {
-    // pair.Skipped: セパレータ前のトークン列
-    // pair.Match:   セパレータにマッチ・変換されたトークン列（最後はnil）
+for _, consume := range pc.SplitN(ctx, sepParser, tokens, n) {
+    // consume.Skipped:  セパレータ前のトークン列
+    // consume.Match:    セパレータにマッチ・変換されたトークン列（最後はnil）
+    // consume.Consumed: Match生成で消費したトークン数
+    // consume.Last:     ループの最後かどうか
 }
 ```
 
+
 ### `FindIter`
 
-パーサーにマッチする部分をすべて繰り返し抽出します。`FindIter`はGoのforループで2つの変数（マッチ前に読み飛ばしたトークン、マッチで変換されたトークン）を返します。最後のループでは後者（マッチ部分）が`nil`となり、前者が残りのトークン列になります。
+パーサーにマッチする部分をすべて繰り返し抽出します。`FindIter`は各イテレーションで`FindIterResult`構造体（スキップ部分・マッチ部分・消費数・最後かどうか）を返します：
+- `Skipped`: マッチ前に読み飛ばしたトークン列
+- `Match`:   マッチして変換されたトークン列（最後はnil）
+- `Consumed`: マッチで消費したトークン数
+- `Last`:    最後のイテレーションかどうか
 
 使用例（詳細は`easy_test.go`参照）：
 
 ```go
-for skipped, match := range pc.FindIter(ctx, parser, tokens) {
-    // skipped: マッチ前に読み飛ばしたトークン
-    // match:   マッチして変換されたトークン（最後はnil）
+for index, res := range pc.FindIter(ctx, parser, tokens) {
+    // index:            ループインデックス
+    // consume.Skipped:  セパレータ前のトークン列
+    // consume.Match:    セパレータにマッチ・変換されたトークン列（最後はnil）
+    // consume.Consumed: Match生成で消費したトークン数
+    // consume.Last:     ループの最後かどうか
 }
 ```
 

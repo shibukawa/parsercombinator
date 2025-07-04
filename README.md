@@ -456,6 +456,7 @@ skipped, match, remained, found := pc.Find(ctx, parser, tokens)
 ```
 - `skipped`: tokens before the match
 - `match`: the matched tokens
+- `consume`: the consumed tokens that uses to produce `match`. If there is not `Trans()`, it is as same as `len(match)`.
 - `remained`: tokens after the match
 - `found`: true if a match was found
 
@@ -465,9 +466,11 @@ skipped, match, remained, found := pc.Find(ctx, parser, tokens)
 Splits the input tokens by a separator parser, returning a slice of `Pair` structs. Each `Pair` contains the skipped tokens before the separator and the matched (converted) tokens for the separator itself. The last element's `Match` will be `nil` and `Skipped` will be the remaining tail. (Like `strings.Split`, but with richer information.)
 
 ```go
-for _, pair := range pc.Split(ctx, sepParser, tokens) {
-    // pair.Skipped: tokens before the separator
-    // pair.Match:   matched (converted) tokens for the separator, or nil at the end
+for _, consume := range pc.Split(ctx, sepParser, tokens) {
+    // consume.Skipped: tokens before the separator
+    // consume.Match:   matched (converted) tokens for the separator, or nil at the end
+    // consume.Consume: Consumed token before converting to consume.Match
+    // consume.Last.    It is a last node or not.
 }
 ```
 
@@ -476,9 +479,11 @@ for _, pair := range pc.Split(ctx, sepParser, tokens) {
 Splits the input tokens by a separator parser, up to N pieces, returning a slice of `Pair` structs (like `Split`, but limited to N splits).
 
 ```go
-for _, pair := range pc.SplitN(ctx, sepParser, tokens, n) {
-    // pair.Skipped: tokens before the separator
-    // pair.Match:   matched (converted) tokens for the separator, or nil at the end
+for _, consume := range pc.SplitN(ctx, sepParser, tokens, n) {
+    // consume.Skipped: tokens before the separator
+    // consume.Match:   matched (converted) tokens for the separator, or nil at the end
+    // consume.Consume: Consumed token before converting to consume.Match
+    // consume.Last.    It is a last node or not.
 }
 ```
 
@@ -490,9 +495,12 @@ Iterates over all non-overlapping matches of a parser in the input tokens. `Find
 Example usage (see `easy_test.go` for real code):
 
 ```go
-for skipped, match := range pc.FindIter(ctx, parser, tokens) {
-    // skipped: tokens before the match
-    // match:   matched (converted) tokens, or nil at the end
+for i, consume := range pc.FindIter(ctx, parser, tokens) {
+    // index:           loop index
+    // consume.Skipped: tokens before the separator
+    // consume.Match:   matched (converted) tokens for the separator, or nil at the end
+    // consume.Consume: Consumed token before converting to consume.Match
+    // consume.Last.    It is a last node or not.
 }
 ```
 

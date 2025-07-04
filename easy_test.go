@@ -31,12 +31,13 @@ func TestFind(t *testing.T) {
 	tokens := makeTokens("a", "b", "c", "d")
 	parser := rawLiteral("c")
 	pctx := NewParseContext[string]()
-	before, match, remain, ok := Find(pctx, parser, tokens)
+	before, match, consume, remain, ok := Find(pctx, parser, tokens)
 	if !ok || len(match) != 1 || match[0].Raw != "c" {
 		t.Errorf("Find failed: got %v, ok=%v", match, ok)
 	}
 	assert.Equal(t, 2, len(before))
 	assert.Equal(t, 1, len(remain))
+	assert.Equal(t, 1, consume)
 }
 
 func TestSplit(t *testing.T) {
@@ -90,10 +91,10 @@ func TestFindIter(t *testing.T) {
 	}
 	pctx := NewParseContext[string]()
 	result := [][]Token[string]{}
-	for before, match := range FindIter(pctx, parser, tokens) {
-		result = append(result, before)
-		if match != nil { // not last
-			assert.Equal(t, "b", match[0].Raw)
+	for _, consume := range FindIter(pctx, parser, tokens) {
+		result = append(result, consume.Skipped)
+		if !consume.Last { // not last
+			assert.Equal(t, "b", consume.Match[0].Raw)
 		}
 	}
 	assert.Equal(t, expected, result)

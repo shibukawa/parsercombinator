@@ -4,34 +4,45 @@ import "iter"
 
 // Find: Returns the first match of the parser in the input token slice, along with tokens before and after the match.
 // Returns: (skipped, match, remained, found)
-func Find[T any](ctx *ParseContext[T], parser Parser[T], tokens []Token[T]) (skipped, match, remained []Token[T], found bool) {
+func Find[T any](ctx *ParseContext[T], parser Parser[T], tokens []Token[T]) (skipped, match []Token[T], consume int, remained []Token[T], found bool) {
 	for i := 0; i < len(tokens); i++ {
-		_, match, err := parser(ctx, tokens[i:])
+		consume, match, err := parser(ctx, tokens[i:])
 		if err == nil {
 			skipped := tokens[:i]
 			remained := tokens[i+len(match):]
-			return skipped, match, remained, true
+			return skipped, match, consume, remained, true
 		}
 	}
-	return nil, nil, nil, false
+	return nil, nil, 0, nil, false
 }
 
-type Pair[T any] struct {
+type Consume[T any] struct {
 	Skipped []Token[T]
 	Match   []Token[T]
+	Consume int
+	Last    bool
 }
 
 // Split: Splits the input tokens by the separator parser, returning slices of tokens between separators.
-func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Pair[T] {
-	var result []Pair[T]
+func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Consume[T] {
+	var result []Consume[T]
 	rest := tokens
 	for len(rest) > 0 {
-		before, match, after, found := Find(ctx, sep, rest)
+		before, match, consume, after, found := Find(ctx, sep, rest)
 		if found {
-			result = append(result, Pair[T]{Skipped: before, Match: match})
+			result = append(result, Consume[T]{
+				Skipped: before,
+				Match:   match,
+				Consume: consume,
+			})
 			rest = after
 		} else {
-			result = append(result, Pair[T]{Skipped: rest, Match: nil})
+			result = append(result, Consume[T]{
+				Skipped: rest,
+				Match:   nil,
+				Consume: 0,
+				Last:    true,
+			})
 			break
 		}
 	}
@@ -39,14 +50,18 @@ func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Pair
 }
 
 // SplitN: Splits the input tokens by the separator parser, up to N pieces (N <= 0 means unlimited).
-func SplitN[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T], n int) []Pair[T] {
-	var result []Pair[T]
+func SplitN[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T], n int) []Consume[T] {
+	var result []Consume[T]
 	rest := tokens
 	count := 1
 	for (n <= 0 || count < n) && len(rest) > 0 {
-		before, match, after, found := Find(ctx, sep, rest)
+		before, match, consume, after, found := Find(ctx, sep, rest)
 		if found {
-			result = append(result, Pair[T]{Skipped: before, Match: match})
+			result = append(result, Consume[T]{
+				Skipped: before,
+				Match:   match,
+				Consume: consume,
+			})
 			rest = after
 			count++
 		} else {
@@ -54,27 +69,33 @@ func SplitN[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T], n int
 		}
 	}
 	if len(rest) > 0 {
-		result = append(result, Pair[T]{Skipped: rest, Match: nil})
+		result = append(result, Consume[T]{Skipped: rest, Last: true})
 	}
 	return result
 }
 
 // FindIter: Calls yield for each non-overlapping match of the parser in the input token slice.
 // Usage: FindIter(ctx, parser, tokens, func(match []Token[T]) bool { ... return true to continue, false to stop })
-func FindIter[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) iter.Seq2[[]Token[T], []Token[T]] {
-	return func(yield func(skipped, match []Token[T]) bool) {
+func FindIter[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) iter.Seq2[int, Consume[T]] {
+	return func(yield func(index int, consume Consume[T]) bool) {
 		rest := tokens
+		index := 0
 		for len(rest) > 0 {
-			skipped, match, remained, found := Find(ctx, sep, rest)
+			skipped, match, consume, remained, found := Find(ctx, sep, rest)
 			if found {
-				if !yield(skipped, match) {
+				if !yield(index, Consume[T]{
+					Skipped: skipped,
+					Match:   match,
+					Consume: consume,
+				}) {
 					return
 				}
 				rest = remained
 			} else {
-				yield(rest, nil)
+				yield(index, Consume[T]{Skipped: rest, Last: true})
 				return
 			}
+			index++
 		}
 	}
 }
