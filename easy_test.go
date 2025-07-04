@@ -40,6 +40,27 @@ func TestFind(t *testing.T) {
 	assert.Equal(t, 1, consume)
 }
 
+func TestFind2(t *testing.T) {
+	tokens := makeTokens("a", "b", "c", "d", "e")
+	// match and combine tokens
+	parser := Trans(
+		Seq(rawLiteral("c"), rawLiteral("d")),
+		func(pctx *ParseContext[string], tokens []Token[string]) ([]Token[string], error) {
+			return []Token[string]{
+				{Raw: "cd", Type: "raw"},
+			}, nil
+		})
+
+	pctx := NewParseContext[string]()
+	before, match, consume, remain, ok := Find(pctx, parser, tokens)
+	assert.True(t, ok, "Find should succeed")
+	assert.Equal(t, 2, len(before), "Expected 2 tokens before match")
+	assert.Equal(t, 2, consume, "Expected 2 tokens consumed")
+	assert.Equal(t, 1, len(match), "Expected 2 tokens match")
+	assert.Equal(t, "cd", match[0].Raw, "First match token should be 'c'")
+	assert.Equal(t, 1, len(remain), "Expected 2 tokens remain")
+}
+
 func TestSplit(t *testing.T) {
 	tokens := makeTokens("a", ",", "b", ",", "c")
 	sep := rawLiteral(",")

@@ -9,7 +9,7 @@ func Find[T any](ctx *ParseContext[T], parser Parser[T], tokens []Token[T]) (ski
 		consume, match, err := parser(ctx, tokens[i:])
 		if err == nil {
 			skipped := tokens[:i]
-			remained := tokens[i+len(match):]
+			remained := tokens[i+consume:]
 			return skipped, match, consume, remained, true
 		}
 	}
