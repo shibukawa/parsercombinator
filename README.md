@@ -370,6 +370,138 @@ Warning: Transformation safety check failed: potential infinite loop in transfor
 - May produce false positives for complex transformations with external state
 - Performance overhead when enabled (use primarily during development)
 - Only checks immediate re-parsing, not multi-step transformation chains
+
+## 🧵 Stepwise, Flexible Parsing: Favoring Loose, Composable Patterns Over Monolithic Parsers
+
+Traditional parser combinator tutorials often encourage writing a single, strict, monolithic parser that consumes the entire input in one go. However, this approach can make your parser:
+
+- **Hard to maintain**: Large, one-shot parsers are difficult to debug and extend
+- **Unfriendly error messages**: Errors are often reported only at the top level, making it hard to pinpoint the real cause
+- **Difficult to reuse**: You can't easily extract or reuse sub-parsers for partial matching, splitting, or iterative extraction
+
+### Design Intent: Stepwise, Composable Parsing
+
+This library encourages a **stepwise, composable parsing style**:
+
+1. **Divide and conquer**: Split your parsing into small, focused steps (e.g., split statements, then parse each statement)
+2. **Partial matching**: Use loose, tolerant patterns to extract chunks, then parse the inside with stricter rules
+3. **Iterative extraction**: Use combinators like `Find`, `Split`, or `FindIter` (see below) to process input in stages
+4. **Better error messages**: By isolating each step, you can provide more precise, user-friendly errors
+
+#### Example: Stepwise Parsing for Statements
+
+Suppose you want to parse a list of statements, but want to give a good error message for each statement, not just for the whole program:
+
+```go
+// Step 1: Split input into statements (e.g., by semicolon)
+statements := pc.Split("statements", pc.Literal(";"))
+
+// Step 2: Parse each statement individually
+statementParser := pc.Or(assignStmt, ifStmt, exprStmt)
+
+// Step 3: Map over statements, parse each, collect errors
+var results []ASTNode
+for i, stmtTokens := range statements {
+    ctx := pc.NewParseContext[ASTNode]()
+    node, err := pc.EvaluateWithTokens(ctx, stmtTokens, statementParser)
+    if err != nil {
+        fmt.Printf("Error in statement %d: %v\n", i+1, err)
+        continue
+    }
+    results = append(results, node[0].Val)
+}
+```
+
+#### Example: Partial Matching with `Find`
+
+You can extract only the relevant part of the input, then parse it:
+
+```go
+// Find the first block delimited by braces
+blockTokens, found := pc.Find("block", pc.Between(pc.Literal("{"), pc.Literal("}")))
+if found {
+    ctx := pc.NewParseContext[ASTNode]()
+    node, err := pc.EvaluateWithTokens(ctx, blockTokens, blockParser)
+    // ...
+}
+```
+
+#### Example: Iterative Extraction with `FindIter`
+
+```go
+// Extract all quoted strings from input
+for _, strTokens := range pc.FindIter("quoted", quotedStringParser) {
+    // Process each quoted string
+}
+```
+
+### Benefits
+
+- **Easier debugging**: Isolate and test each step separately
+- **Better error messages**: Report errors at the most relevant level
+- **Flexible**: Mix and match strict and loose parsing as needed
+- **Reusable**: Use the same sub-parsers for different tasks (e.g., validation, extraction, transformation)
+
+
+### API: Find, Split, SplitN, FindIter
+
+These utility APIs make partial and stepwise parsing easy and idiomatic in Go:
+
+#### `Find`
+
+Finds the first match of a parser in the input tokens, and returns the tokens before, the matched tokens, and the tokens after the match.
+
+```go
+skipped, match, remained, found := pc.Find(ctx, parser, tokens)
+```
+- `skipped`: tokens before the match
+- `match`: the matched tokens
+- `remained`: tokens after the match
+- `found`: true if a match was found
+
+
+#### `Split`
+
+Splits the input tokens by a separator parser, returning a slice of `Pair` structs. Each `Pair` contains the skipped tokens before the separator and the matched (converted) tokens for the separator itself. The last element's `Match` will be `nil` and `Skipped` will be the remaining tail. (Like `strings.Split`, but with richer information.)
+
+```go
+for _, pair := range pc.Split(ctx, sepParser, tokens) {
+    // pair.Skipped: tokens before the separator
+    // pair.Match:   matched (converted) tokens for the separator, or nil at the end
+}
+```
+
+#### `SplitN`
+
+Splits the input tokens by a separator parser, up to N pieces, returning a slice of `Pair` structs (like `Split`, but limited to N splits).
+
+```go
+for _, pair := range pc.SplitN(ctx, sepParser, tokens, n) {
+    // pair.Skipped: tokens before the separator
+    // pair.Match:   matched (converted) tokens for the separator, or nil at the end
+}
+```
+
+
+#### `FindIter`
+
+Iterates over all non-overlapping matches of a parser in the input tokens. `FindIter` returns a channel of two values per iteration: the tokens skipped before the match, and the matched (converted) tokens. On the last iteration, the matched tokens will be `nil` and the skipped tokens will be the remaining tail.
+
+Example usage (see `easy_test.go` for real code):
+
+```go
+for skipped, match := range pc.FindIter(ctx, parser, tokens) {
+    // skipped: tokens before the match
+    // match:   matched (converted) tokens, or nil at the end
+}
+```
+
+This Go-idiomatic iterator pattern allows you to process matches and skipped regions in a natural, readable way. You can break early from the loop as needed.
+
+These APIs allow you to build flexible, composable, and user-friendly parsers that can extract, split, and iterate over parts of your token stream with minimal boilerplate.
+
+See `easy_test.go` and `examples/` for concrete usage.
+
 ### Recursive Parsers with Alias and Lazy
 
 Parser combinators provide two approaches for handling recursive grammars:
