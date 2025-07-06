@@ -120,3 +120,157 @@ func TestFindIter(t *testing.T) {
 	}
 	assert.Equal(t, expected, result)
 }
+
+func TestFindIterLastFlag(t *testing.T) {
+	tokens := makeTokens("a", ",", "b", ",", "c")
+	sep := rawLiteral(",")
+	pctx := NewParseContext[string]()
+	var results []bool
+	for _, part := range FindIter(pctx, sep, tokens) {
+		results = append(results, part.Last)
+	}
+	// 最後の要素のLastがtrueであることを確認
+	if len(results) == 0 {
+		t.Fatalf("FindIter: no results")
+	}
+	assert.True(t, results[len(results)-1], "Last flag should be true for the last result")
+	// それ以外はfalse
+	for i := 0; i < len(results)-1; i++ {
+		assert.False(t, results[i], "Last flag should be false for non-last results")
+	}
+}
+
+func TestFindIterLastFlag_TableDriven(t *testing.T) {
+	type testCase struct {
+		name   string
+		input  []string
+		expect []bool // Lastフラグの期待値
+	}
+	cases := []testCase{
+		{
+			name:   "no trailing separator",
+			input:  []string{"a", ",", "b", ",", "c"},
+			expect: []bool{false, false, true},
+		},
+		{
+			name:   "with trailing separator",
+			input:  []string{"a", ",", "b", ",", "c", ","},
+			expect: []bool{false, false, false, true},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := makeTokens(tc.input...)
+			sep := rawLiteral(",")
+			pctx := NewParseContext[string]()
+			var results []bool
+			for _, part := range FindIter(pctx, sep, tokens) {
+				results = append(results, part.Last)
+			}
+			if len(results) != len(tc.expect) {
+				t.Fatalf("FindIter: expected %d results, got %d", len(tc.expect), len(results))
+			}
+			for i := range results {
+				assert.Equal(t, tc.expect[i], results[i], "Last flag mismatch at index %d", i)
+			}
+		})
+	}
+}
+
+func TestSplitLastFlag_TableDriven(t *testing.T) {
+	type testCase struct {
+		name       string
+		input      []string
+		expectLen  int
+		expectLast []bool // Lastフラグの期待値
+	}
+	cases := []testCase{
+		{
+			name:       "Split: no trailing separator",
+			input:      []string{"a", ",", "b", ",", "c"},
+			expectLen:  3,
+			expectLast: []bool{false, false, true},
+		},
+		{
+			name:       "Split: with trailing separator",
+			input:      []string{"a", ",", "b", ",", "c", ","},
+			expectLen:  4,
+			expectLast: []bool{false, false, false, true},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := makeTokens(tc.input...)
+			sep := rawLiteral(",")
+			pctx := NewParseContext[string]()
+			parts := Split(pctx, sep, tokens)
+			var results []bool
+			for _, part := range parts {
+				results = append(results, part.Last)
+			}
+			if len(results) != tc.expectLen {
+				t.Fatalf("Split: expected %d results, got %d", tc.expectLen, len(results))
+			}
+			assert.Equal(t, tc.expectLast, results)
+		})
+	}
+}
+
+func TestSplitNLastFlag_TableDriven(t *testing.T) {
+	type testCase struct {
+		name       string
+		input      []string
+		n          int
+		expectLen  int
+		expectLast []bool // Lastフラグの期待値
+	}
+	cases := []testCase{
+		{
+			name:       "SplitN: no trailing separator, n=2",
+			input:      []string{"a", ",", "b", ",", "c"},
+			n:          2,
+			expectLen:  2,
+			expectLast: []bool{false, true},
+		},
+		{
+			name:       "SplitN: with trailing separator, n=3",
+			input:      []string{"a", ",", "b", ",", "c", ","},
+			n:          3,
+			expectLen:  3,
+			expectLast: []bool{false, false, true},
+		},
+		{
+			name:       "SplitN: n is much larger than separator count",
+			input:      []string{"a", ",", "b", ",", "c"},
+			n:          10,
+			expectLen:  3,
+			expectLast: []bool{false, false, true},
+		},
+		{
+			name:       "SplitN: n is exactly separator count + 1",
+			input:      []string{"a", ",", "b", ",", "c"},
+			n:          3,
+			expectLen:  3,
+			expectLast: []bool{false, false, true},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := makeTokens(tc.input...)
+			sep := rawLiteral(",")
+			pctx := NewParseContext[string]()
+			parts := SplitN(pctx, sep, tokens, tc.n)
+			var results []bool
+			for _, part := range parts {
+				results = append(results, part.Last)
+			}
+			if len(results) != tc.expectLen {
+				t.Fatalf("SplitN: expected %d results, got %d", tc.expectLen, len(results))
+			}
+			assert.Equal(t, tc.expectLast, results)
+		})
+	}
+}

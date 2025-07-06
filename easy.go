@@ -27,6 +27,7 @@ type Consume[T any] struct {
 func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Consume[T] {
 	var result []Consume[T]
 	rest := tokens
+	foundLastSeparator := false
 	for len(rest) > 0 {
 		before, match, consume, after, found := Find(ctx, sep, rest)
 		if found {
@@ -36,6 +37,7 @@ func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Cons
 				Consume: consume,
 			})
 			rest = after
+			foundLastSeparator = true
 		} else {
 			result = append(result, Consume[T]{
 				Skipped: rest,
@@ -43,8 +45,18 @@ func Split[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) []Cons
 				Consume: 0,
 				Last:    true,
 			})
+			foundLastSeparator = false
 			break
 		}
+	}
+	// If the last token was a separator, add an empty element (like strings.Split)
+	if foundLastSeparator {
+		result = append(result, Consume[T]{
+			Skipped: nil,
+			Match:   nil,
+			Consume: 0,
+			Last:    true,
+		})
 	}
 	return result
 }
@@ -80,6 +92,7 @@ func FindIter[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) ite
 	return func(yield func(index int, consume Consume[T]) bool) {
 		rest := tokens
 		index := 0
+		foundLastSeparator := false
 		for len(rest) > 0 {
 			skipped, match, consume, remained, found := Find(ctx, sep, rest)
 			if found {
@@ -91,11 +104,16 @@ func FindIter[T any](ctx *ParseContext[T], sep Parser[T], tokens []Token[T]) ite
 					return
 				}
 				rest = remained
+				foundLastSeparator = true
 			} else {
 				yield(index, Consume[T]{Skipped: rest, Last: true})
+				foundLastSeparator = false
 				return
 			}
 			index++
+		}
+		if foundLastSeparator {
+			yield(index, Consume[T]{Last: true})
 		}
 	}
 }
