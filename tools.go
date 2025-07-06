@@ -623,3 +623,10 @@ func DetectLeftRecursion[T any](traces []*TraceInfo) []string {
 
 	return warnings
 }
+
+// Drop: Returns a parser that matches the given parser but discards its result (returns no tokens).
+func Drop[T any](parser Parser[T]) Parser[T] {
+	return Trans(parser, func(pctx *ParseContext[T], _ []Token[T]) ([]Token[T], error) {
+		return []Token[T]{}, nil
+	})
+}

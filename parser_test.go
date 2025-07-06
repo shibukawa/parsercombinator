@@ -1970,3 +1970,25 @@ func TestLazyParser(t *testing.T) {
 		assert.Equal(t, 7, result[0]) // 1 + (2 * 3) = 7 (right associative)
 	})
 }
+
+func TestDrop(t *testing.T) {
+	tokens := makeTokens("a", ",", "b")
+	pctx := NewParseContext[string]()
+
+	// Dropでカンマを消去
+	parser := Seq(
+		rawLiteral("a"),
+		Drop(rawLiteral(",")),
+		rawLiteral("b"),
+	)
+
+	consumed, out, err := parser(pctx, tokens)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, consumed)
+	// 出力トークンにカンマが含まれていないことを確認
+	if len(out) != 2 {
+		t.Fatalf("expected 2 tokens, got %d", len(out))
+	}
+	assert.Equal(t, "a", out[0].Raw)
+	assert.Equal(t, "b", out[1].Raw)
+}
