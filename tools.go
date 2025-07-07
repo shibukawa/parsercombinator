@@ -265,7 +265,7 @@ func orTryFast[T any](pctx *ParseContext[T], src []Token[T], parsers []Parser[T]
 			pos := getFirstPos(src)
 
 			// Get caller information using runtime to find where Or was called
-			var location string = "unknown location"
+			var location = "unknown location"
 			for i := 1; i < 15; i++ { // Check up to 15 levels
 				_, file, line, ok := runtime.Caller(i)
 				if ok {
@@ -604,7 +604,7 @@ func DetectLeftRecursion[T any](traces []*TraceInfo) []string {
 
 	for _, trace := range traces {
 		if trace.TraceType == Enter {
-			posKey := fmt.Sprintf("%s", trace.Pos.String())
+			posKey := trace.Pos.String()
 			positionCalls[posKey] = append(positionCalls[posKey], trace.Name)
 
 			// If same parser called multiple times at same position

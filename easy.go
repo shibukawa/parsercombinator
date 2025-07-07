@@ -1,6 +1,19 @@
 package parsercombinator
 
-import "iter"
+import (
+	"fmt"
+	"iter"
+)
+
+// EOS: Parser that matches only if there are no remaining input tokens.
+func EOS[T any]() Parser[T] {
+	return func(ctx *ParseContext[T], tokens []Token[T]) (int, []Token[T], error) {
+		if len(tokens) == 0 {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("expected end of sequence, but got: %v", tokens[0])
+	}
+}
 
 // Find: Returns the first match of the parser in the input token slice, along with tokens before and after the match.
 // Returns: (skipped, match, remained, found)

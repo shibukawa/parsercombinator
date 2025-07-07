@@ -19,9 +19,9 @@ func rawLiteral(expected string) Parser[string] {
 	}
 }
 
-func makeTokens(strs ...string) []Token[string] {
-	tokens := make([]Token[string], len(strs))
-	for i, s := range strs {
+func makeTokens(strings ...string) []Token[string] {
+	tokens := make([]Token[string], len(strings))
+	for i, s := range strings {
 		tokens[i] = Token[string]{Raw: s, Type: "raw"}
 	}
 	return tokens
@@ -129,12 +129,12 @@ func TestFindIterLastFlag(t *testing.T) {
 	for _, part := range FindIter(pctx, sep, tokens) {
 		results = append(results, part.Last)
 	}
-	// 最後の要素のLastがtrueであることを確認
+	// Check that the Last flag is true for the last element
 	if len(results) == 0 {
 		t.Fatalf("FindIter: no results")
 	}
 	assert.True(t, results[len(results)-1], "Last flag should be true for the last result")
-	// それ以外はfalse
+	// All others should be false
 	for i := 0; i < len(results)-1; i++ {
 		assert.False(t, results[i], "Last flag should be false for non-last results")
 	}
@@ -144,7 +144,7 @@ func TestFindIterLastFlag_TableDriven(t *testing.T) {
 	type testCase struct {
 		name   string
 		input  []string
-		expect []bool // Lastフラグの期待値
+		expect []bool // Expected values for Last flag
 	}
 	cases := []testCase{
 		{
@@ -183,7 +183,7 @@ func TestSplitLastFlag_TableDriven(t *testing.T) {
 		name       string
 		input      []string
 		expectLen  int
-		expectLast []bool // Lastフラグの期待値
+		expectLast []bool // Expected values for Last flag
 	}
 	cases := []testCase{
 		{
@@ -224,7 +224,7 @@ func TestSplitNLastFlag_TableDriven(t *testing.T) {
 		input      []string
 		n          int
 		expectLen  int
-		expectLast []bool // Lastフラグの期待値
+		expectLast []bool // Expected values for Last flag
 	}
 	cases := []testCase{
 		{
@@ -273,4 +273,21 @@ func TestSplitNLastFlag_TableDriven(t *testing.T) {
 			assert.Equal(t, tc.expectLast, results)
 		})
 	}
+}
+
+func TestEOS(t *testing.T) {
+	tokens := makeTokens("a", "b")
+	pctx := NewParseContext[string]()
+
+	// Error if tokens remain
+	consumed, out, err := EOS[string]()(pctx, tokens)
+	assert.Error(t, err)
+	assert.Equal(t, 0, consumed)
+	assert.Equal(t, 0, len(out))
+
+	// Success if no tokens remain
+	consumed, out, err = EOS[string]()(pctx, []Token[string]{})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, consumed)
+	assert.Equal(t, 0, len(out))
 }
