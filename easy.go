@@ -1,7 +1,6 @@
 package parsercombinator
 
 import (
-	"fmt"
 	"iter"
 )
 
@@ -11,7 +10,7 @@ func EOS[T any]() Parser[T] {
 		if len(tokens) == 0 {
 			return 0, nil, nil
 		}
-		return 0, nil, fmt.Errorf("expected end of sequence, but got: %v", tokens[0])
+		return 0, nil, ErrNotMatch
 	}
 }
 
